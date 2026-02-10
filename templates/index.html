@@ -3,51 +3,251 @@
 {% block title %}我的记录本 - 主页{% endblock %}
 
 {% block content %}
-<div class="card">
-    <div class="card-body">
-        <h2 class="card-title">分类记录</h2>
-        <ul class="list-group list-group-flush">
-            <li class="list-group-item"><a href="/medicine">药品记录</a></li>
-            <li class="list-group-item"><a href="/clothes">衣服清单</a></li>
-            <li class="list-group-item"><a href="/shopping">购物清单</a></li>
-        </ul>
+<!-- 分类导航卡片 -->
+<div class="row row-cols-1 row-cols-md-2 g-4">
+    <div class="col">
+        <div class="card h-100 text-center category-card">
+            <a href="/people" class="stretched-link"></a>
+            <div class="card-body">
+                <h5 class="card-title">👨‍👩‍👧‍👦 人员管理</h5>
+                <p class="card-text text-muted">添加或删除家庭成员</p>
+            </div>
+        </div>
+    </div>
+    <div class="col">
+        <div class="card h-100 text-center category-card">
+            <a href="/medicine" class="stretched-link"></a>
+            <div class="card-body">
+                <h5 class="card-title">💊 药品记录</h5>
+                <p class="card-text text-muted">管理家庭成员的用药情况</p>
+            </div>
+        </div>
+    </div>
+    <div class="col">
+        <div class="card h-100 text-center category-card">
+            <a href="/clothes" class="stretched-link"></a>
+            <div class="card-body">
+                <h5 class="card-title">👕 衣服清单</h5>
+                <p class="card-text text-muted">整理每个人的衣物</p>
+            </div>
+        </div>
+    </div>
+    <div class="col">
+        <div class="card h-100 text-center category-card">
+            <a href="/shopping" class="stretched-link"></a>
+            <div class="card-body">
+                <h5 class="card-title">🛒 购物清单</h5>
+                <p class="card-text text-muted">记录需要购买的物品</p>
+            </div>
+        </div>
     </div>
 </div>
 
+
+<!-- 通用记录 -->
 <div class="card mt-4">
     <div class="card-body">
-        <h2 class="card-title">通用记录</h2>
-        <div class="row g-2 mb-3">
-            <div class="col-md-6">
-                <input type="text" id="record-input" class="form-control" placeholder="例如：买一件新衣服">
-            </div>
-            <div class="col-md-2">
-                <input type="date" id="record-date" class="form-control">
-            </div>
-            <div class="col-md-2">
-                <input type="time" id="record-time" class="form-control">
-            </div>
-            <div class="col-md-2">
-                <select id="record-urgency" class="form-select">
-                    <option value="低">低</option>
-                    <option value="中">中</option>
-                    <option value="高">高</option>
-                </select>
-            </div>
+        <div class="d-flex justify-content-between align-items-center">
+            <h2 class="card-title mb-0">通用记录</h2>
+            <!-- 触发模态框的按钮 -->
+            <button type="button" class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#addGeneralRecordModal">
+                添加记录
+            </button>
         </div>
-        <button class="btn btn-primary" type="button" onclick="addRecord('general')">添加</button>
         <hr>
         <ul id="record-list" class="list-group">
             <!-- 记录将在这里动态显示 -->
         </ul>
     </div>
 </div>
+
+<!-- 添加通用记录的模态框 -->
+<div class="modal fade" id="addGeneralRecordModal" tabindex="-1" aria-labelledby="addGeneralRecordModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="addGeneralRecordModalLabel">添加通用记录</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <div class="row g-2 mb-3">
+                    <div class="col-md-12">
+                        <label for="record-input" class="form-label">内容</label>
+                        <input type="text" id="record-input" class="form-control" placeholder="例如：买一件新衣服">
+                    </div>
+                    <div class="col-md-4">
+                        <label for="record-date" class="form-label">日期</label>
+                        <input type="date" id="record-date" class="form-control">
+                    </div>
+                    <div class="col-md-4">
+                        <label for="record-time" class="form-label">时间</label>
+                        <input type="time" id="record-time" class="form-control">
+                    </div>
+                    <div class="col-md-4">
+                        <label for="record-urgency" class="form-label">紧急程度</label>
+                        <select id="record-urgency" class="form-select">
+                            <option value="低">低</option>
+                            <option value="中">中</option>
+                            <option value="高">高</option>
+                        </select>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">关闭</button>
+                <button type="button" class="btn btn-primary" onclick="addRecord('general')">确认添加</button>
+            </div>
+        </div>
+    </div>
+</div>
 {% endblock %}
 
 {% block body_script %}
 <script>
+    // 渲染通用记录，按天分组
+    async function fetchAndRenderGeneralRecords() {
+        const response = await fetch(`/api/records?category=general`);
+        const records = await response.json();
+        const list = document.getElementById('record-list');
+        list.innerHTML = '';
+
+        if (records.length === 0) {
+            list.innerHTML = '<li class="list-group-item text-muted">暂无通用记录。</li>';
+            return;
+        }
+
+        // 按日期对记录进行分组
+        const recordsByDate = records.reduce((acc, record) => {
+            const date = record.date || '无日期';
+            if (!acc[date]) {
+                acc[date] = [];
+            }
+            acc[date].push(record);
+            return acc;
+        }, {});
+
+        // 按日期键（从旧到新，升序）排序并渲染
+        Object.keys(recordsByDate).sort().forEach(date => {
+            // 添加日期标题
+            const dateHeader = document.createElement('li');
+            dateHeader.className = 'list-group-item list-group-item-secondary fw-bold';
+            dateHeader.textContent = date;
+            list.appendChild(dateHeader);
+
+            // 渲染该日期的记录
+            recordsByDate[date].forEach(record => {
+                const li = document.createElement('li');
+                li.className = 'list-group-item d-flex justify-content-between align-items-center';
+                
+                const urgencyBadge = record.urgency ? `<span class="badge bg-${record.urgency === '高' ? 'danger' : (record.urgency === '中' ? 'warning' : 'secondary')} me-2">${record.urgency}</span>` : '';
+
+                li.innerHTML = `
+                    <div>
+                        ${urgencyBadge}
+                        <span>${record.content}</span>
+                        <div class="record-meta">${record.time || ''}</div>
+                    </div>
+                    <div>
+                        <a href="#" class="btn btn-sm btn-outline-primary me-2" onclick='openEditModal(${JSON.stringify(record)})'>编辑</a>
+                        <a href="#" class="delete-btn" onclick="deleteRecord(${record.id}, 'general')">删除</a>
+                    </div>
+                `;
+                list.appendChild(li);
+            });
+        });
+    }
+
+    // 打开编辑模态框并填充数据
+    function openEditModal(record) {
+        const modal = new bootstrap.Modal(document.getElementById('addGeneralRecordModal'));
+        const modalTitle = document.getElementById('addGeneralRecordModalLabel');
+        const confirmButton = document.querySelector('#addGeneralRecordModal .btn-primary');
+
+        modalTitle.textContent = '编辑通用记录';
+        document.getElementById('record-input').value = record.content;
+        document.getElementById('record-date').value = record.date;
+        document.getElementById('record-time').value = record.time;
+        document.getElementById('record-urgency').value = record.urgency;
+
+        confirmButton.textContent = '确认修改';
+        confirmButton.onclick = () => updateRecord(record.id, 'general');
+        
+        modal.show();
+    }
+
+    // 重置模态框为“添加”状态
+    document.getElementById('addGeneralRecordModal').addEventListener('hidden.bs.modal', event => {
+        const modalTitle = document.getElementById('addGeneralRecordModalLabel');
+        const confirmButton = document.querySelector('#addGeneralRecordModal .btn-primary');
+        
+        modalTitle.textContent = '添加通用记录';
+        document.getElementById('record-input').value = '';
+        // 可以选择重置日期和时间
+        // const now = new Date();
+        // document.getElementById('record-date').value = now.toISOString().split('T')[0];
+        // document.getElementById('record-time').value = now.toTimeString().split(' ')[0].substring(0, 5);
+
+        confirmButton.textContent = '确认添加';
+        confirmButton.onclick = () => addRecord('general');
+    });
+
+
+    // 重写 addRecord 以便在添加后关闭模态框并刷新
+    async function addRecord(category) {
+        const content = document.getElementById('record-input').value;
+        const date = document.getElementById('record-date').value;
+        const time = document.getElementById('record-time').value;
+        const urgency = document.getElementById('record-urgency').value;
+
+        if (!content) return alert('内容不能为空！');
+
+        await fetch('/api/records', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ content, category, date, time, urgency })
+        });
+        
+        document.getElementById('record-input').value = '';
+        
+        const modal = bootstrap.Modal.getInstance(document.getElementById('addGeneralRecordModal'));
+        modal.hide();
+
+        fetchAndRenderGeneralRecords();
+    }
+
+    // 新增：更新记录
+    async function updateRecord(id, category) {
+        const payload = {
+            content: document.getElementById('record-input').value,
+            date: document.getElementById('record-date').value,
+            time: document.getElementById('record-time').value,
+            urgency: document.getElementById('record-urgency').value,
+            category: category
+        };
+
+        if (!payload.content) return alert('内容不能为空！');
+
+        await fetch(`/api/records/${id}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+        });
+
+        const modal = bootstrap.Modal.getInstance(document.getElementById('addGeneralRecordModal'));
+        modal.hide();
+
+        fetchAndRenderGeneralRecords();
+    }
+    
+    // 重写 deleteRecord 以便刷新
+    async function deleteRecord(id, category) {
+        if (!confirm('确定要删除这条记录吗？')) return;
+        await fetch(`/api/records/${id}`, { method: 'DELETE' });
+        fetchAndRenderGeneralRecords();
+    }
+
     window.onload = () => {
-        fetchRecords('general');
+        fetchAndRenderGeneralRecords();
         const now = new Date();
         const date = now.toISOString().split('T')[0];
         const time = now.toTimeString().split(' ')[0].substring(0, 5);

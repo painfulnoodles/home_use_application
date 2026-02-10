@@ -1,0 +1,200 @@
+{% extends "base.html" %}
+
+{% block title %}人员管理{% endblock %}
+
+{% block head_script %}
+<style>
+    .details-card .list-group-item {
+        background-color: #f8f9fa;
+    }
+    .medicine-icon {
+        display: inline-block;
+        width: 24px;
+        height: 12px;
+        border-radius: 6px;
+        margin-right: 8px;
+        vertical-align: middle;
+        border: 1px solid rgba(0,0,0,0.2);
+    }
+    .medicine-icon.tablet {
+        width: 16px;
+        height: 16px;
+        border-radius: 50%;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<a href="/" class="btn btn-sm btn-outline-secondary mb-3">&lt; 返回主页</a>
+
+<div class="row">
+    <!-- 左侧：人物列表与操作 -->
+    <div class="col-md-4">
+        <div class="card">
+            <div class="card-body">
+                <h5 class="card-title">添加新人物</h5>
+                <div class="input-group mb-3">
+                    <input type="text" id="person-name-input" class="form-control" placeholder="人物名称">
+                    <button class="btn btn-primary" onclick="addPerson()">添加</button>
+                </div>
+                <hr>
+                <h5 class="card-title">查看人物信息</h5>
+                <select id="person-select" class="form-select" onchange="showPersonDetails()">
+                    <option selected disabled>请选择一个人物...</option>
+                </select>
+            </div>
+        </div>
+        <div class="card mt-3">
+            <div class="card-header">人物列表</div>
+            <ul id="people-list" class="list-group list-group-flush">
+                <!-- 人物将在这里动态生成 -->
+            </ul>
+        </div>
+    </div>
+
+    <!-- 右侧：人物详细信息 -->
+    <div class="col-md-8">
+        <div id="details-area" class="d-none">
+            <h3 id="details-person-name"></h3>
+            <hr>
+            <!-- 药品信息 -->
+            <div class="card details-card mb-3">
+                <div class="card-header">💊 药品信息</div>
+                <ul id="medicines-list" class="list-group list-group-flush"></ul>
+            </div>
+            <!-- 衣物信息 -->
+            <div class="card details-card">
+                <div class="card-header">👕 衣物信息</div>
+                <ul id="clothes-list" class="list-group list-group-flush"></ul>
+            </div>
+        </div>
+        <div id="details-placeholder" class="text-center text-muted mt-5">
+            <p>请从左侧选择一个人物以查看详细信息。</p>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block body_script %}
+<script>
+    // 填充人物列表和下拉菜单
+    async function populatePeopleLists() {
+        const response = await fetch('/api/people');
+        const people = await response.json();
+        
+        const list = document.getElementById('people-list');
+        const select = document.getElementById('person-select');
+        
+        list.innerHTML = '';
+        select.innerHTML = '<option selected disabled value="">请选择一个人物...</option>';
+
+        if (people.length === 0) {
+            list.innerHTML = '<li class="list-group-item text-muted">暂无人物，请在左侧添加。</li>';
+            return;
+        }
+
+        people.forEach(person => {
+            // 填充列表
+            const li = document.createElement('li');
+            li.className = 'list-group-item d-flex justify-content-between align-items-center';
+            li.innerHTML = `
+                <span>${person.name}</span>
+                <a href="#" class="delete-btn" onclick="deletePerson(${person.id})">删除</a>
+            `;
+            list.appendChild(li);
+
+            // 填充下拉菜单
+            const option = document.createElement('option');
+            option.value = person.id;
+            option.textContent = person.name;
+            select.appendChild(option);
+        });
+    }
+
+    // 显示选中人物的详细信息
+    async function showPersonDetails() {
+        const select = document.getElementById('person-select');
+        const personId = select.value;
+        const personName = select.options[select.selectedIndex].text;
+
+        if (!personId) return;
+
+        const response = await fetch(`/api/people/${personId}/details`);
+        const details = await response.json();
+
+        document.getElementById('details-placeholder').classList.add('d-none');
+        document.getElementById('details-area').classList.remove('d-none');
+        document.getElementById('details-person-name').textContent = `${personName} 的相关信息`;
+
+        // 渲染药品列表
+        const medicinesList = document.getElementById('medicines-list');
+        medicinesList.innerHTML = '';
+        if (details.medicines.length > 0) {
+            details.medicines.forEach(item => {
+                const iconHtml = `<span class="medicine-icon ${item.style}" style="background-color: ${item.color};"></span>`;
+                const li = document.createElement('li');
+                li.className = 'list-group-item';
+                li.innerHTML = `${iconHtml} <strong>${item.content}</strong> <small class="text-muted">(${item.frequency || '未指定频率'})</small>`;
+                medicinesList.appendChild(li);
+            });
+        } else {
+            medicinesList.innerHTML = '<li class="list-group-item text-muted">无相关药品记录。</li>';
+        }
+
+        // 渲染衣物列表
+        const clothesList = document.getElementById('clothes-list');
+        clothesList.innerHTML = '';
+        if (details.clothes.length > 0) {
+            details.clothes.forEach(item => {
+                const li = document.createElement('li');
+                li.className = 'list-group-item';
+                li.innerHTML = `<strong>${item.content}</strong> <small class="text-muted">(${item.type}, ${item.color}) - ${item.quantity}件</small>`;
+                clothesList.appendChild(li);
+            });
+        } else {
+            clothesList.innerHTML = '<li class="list-group-item text-muted">无相关衣物记录。</li>';
+        }
+    }
+
+    // 添加新人物
+    async function addPerson() {
+        const nameInput = document.getElementById('person-name-input');
+        const name = nameInput.value.trim();
+        if (!name) return alert('人物名称不能为空！');
+
+        const response = await fetch('/api/people', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ name })
+        });
+
+        if (response.ok) {
+            nameInput.value = '';
+            await populatePeopleLists();
+        } else {
+            const error = await response.json();
+            alert(`添加失败: ${error.error}`);
+        }
+    }
+
+    // 删除人物
+    async function deletePerson(id) {
+        if (!confirm('确定要删除这个人物吗？相关的衣物和药品记录也会被删除！')) return;
+        
+        const response = await fetch(`/api/people/${id}`, { method: 'DELETE' });
+
+        if (response.ok) {
+            // 清空详情区域并重新加载列表
+            document.getElementById('details-area').classList.add('d-none');
+            document.getElementById('details-placeholder').classList.remove('d-none');
+            await populatePeopleLists();
+        } else {
+            const error = await response.json();
+            alert(`删除失败: ${error.error}`);
+        }
+    }
+
+    // 页面加载时初始化
+    window.onload = populatePeopleLists;
+</script>
+{% endblock %}

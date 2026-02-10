@@ -3,33 +3,55 @@
 {% block title %}购物清单{% endblock %}
 
 {% block content %}
-<a href="/" class="btn btn-sm btn-outline-secondary mb-3">&lt; 返回主页</a>
-<div class="card">
-    <div class="card-body">
-        <h1 class="card-title">添加购物项</h1>
-        <div class="row g-2">
-            <div class="col-md-4">
-                <label for="record-input" class="form-label">物品名称</label>
-                <input type="text" id="record-input" class="form-control" placeholder="例如：牛奶">
+<div class="d-flex justify-content-between align-items-center mb-3">
+    <div>
+        <a href="/" class="btn btn-sm btn-outline-secondary">&lt; 返回主页</a>
+    </div>
+    <h1 class="mb-0">购物清单</h1>
+    <div>
+        <!-- 触发模态框的按钮 -->
+        <button type="button" class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#addShoppingItemModal">
+            添加购物项
+        </button>
+    </div>
+</div>
+
+<!-- 添加购物项的模态框 -->
+<div class="modal fade" id="addShoppingItemModal" tabindex="-1" aria-labelledby="addShoppingItemModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="addShoppingItemModalLabel">添加购物项</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
             </div>
-            <div class="col-md-2">
-                <label for="record-quantity" class="form-label">数量（选填）</label>
-                <input type="number" id="record-quantity" class="form-control" placeholder="例如: 2">
+            <div class="modal-body">
+                <div class="row g-2">
+                    <div class="col-md-12 mb-2">
+                        <label for="record-input" class="form-label">物品名称</label>
+                        <input type="text" id="record-input" class="form-control" placeholder="例如：牛奶">
+                    </div>
+                    <div class="col-md-6">
+                        <label for="record-quantity" class="form-label">数量（选填）</label>
+                        <input type="number" id="record-quantity" class="form-control" placeholder="例如: 2">
+                    </div>
+                    <div class="col-md-6">
+                        <label for="record-unit" class="form-label">单位（选填）</label>
+                        <input type="text" id="record-unit" class="form-control" placeholder="例如: 盒">
+                    </div>
+                    <div class="col-md-12 mt-2">
+                        <label for="record-brand" class="form-label">品牌 (选填)</label>
+                        <input type="text" id="record-brand" class="form-control" placeholder="例如: 光明">
+                    </div>
+                </div>
             </div>
-            <div class="col-md-2">
-                <label for="record-unit" class="form-label">单位（选填）</label>
-                <input type="text" id="record-unit" class="form-control" placeholder="例如: 盒">
-            </div>
-            <div class="col-md-3">
-                <label for="record-brand" class="form-label">品牌 (选填)</label>
-                <input type="text" id="record-brand" class="form-control" placeholder="例如: 光明">
-            </div>
-            <div class="col-md-1 d-flex align-items-end">
-                <button class="btn btn-primary w-100" type="button" onclick="addShoppingItem()">添加</button>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">关闭</button>
+                <button type="button" class="btn btn-primary" onclick="addShoppingItem()">确认添加</button>
             </div>
         </div>
     </div>
 </div>
+
 
 <div class="row mt-4">
     <!-- 待购买列表 -->
@@ -61,32 +83,44 @@
     function renderList(items, listId, isPending) {
         const list = document.getElementById(listId);
         list.innerHTML = '';
+
+        if (items.length === 0) {
+            list.innerHTML = `<li class="list-group-item text-muted">${isPending ? '暂无待购物品。' : '暂无已购物品。'}</li>`;
+            return;
+        }
+
         items.forEach(item => {
             const li = document.createElement('li');
             li.className = 'list-group-item d-flex justify-content-between align-items-center';
             
-            const brandInfo = item.brand ? `<span class="text-muted">(${item.brand})</span>` : '';
-            const itemDetails = `${item.content} ${brandInfo} - ${item.quantity || ''} ${item.unit || ''}`;
+            const itemDetails = `
+                <strong>${item.content}</strong>
+                <small class="text-muted ms-2">${item.quantity || ''} ${item.unit || ''} ${item.brand ? `(${item.brand})` : ''}</small>
+            `;
 
             if (isPending) {
                 li.innerHTML = `
-                    <span>${itemDetails}</span>
+                    <div>${itemDetails}</div>
                     <div>
+                        <button class="btn btn-sm btn-outline-primary me-2" onclick='openEditShoppingItemModal(${JSON.stringify(item)})'>编辑</button>
                         <button class="btn btn-sm btn-success me-2" onclick="markAsCompleted(${item.id})">已购买</button>
                         <a href="#" class="delete-btn" onclick="deleteShoppingItem(${item.id})">删除</a>
                     </div>
                 `;
             } else {
                 li.innerHTML = `
-                    <span class="text-muted text-decoration-line-through">${itemDetails}</span>
-                    <a href="#" class="delete-btn" onclick="deleteShoppingItem(${item.id})">删除</a>
+                    <div class="text-decoration-line-through">${itemDetails}</div>
+                    <div>
+                        <button class="btn btn-sm btn-outline-primary me-2" onclick='openEditShoppingItemModal(${JSON.stringify(item)})'>编辑</button>
+                        <a href="#" class="delete-btn" onclick="deleteShoppingItem(${item.id})">删除</a>
+                    </div>
                 `;
             }
             list.appendChild(li);
         });
     }
 
-    // 获取并渲染所有购物清单项目
+    // 获取所有购物项并显示
     async function fetchAllShoppingItems() {
         // 获取待购买列表
         const pendingResponse = await fetch(`/api/records?category=${CATEGORY}&status=pending`);
@@ -118,6 +152,70 @@
         document.getElementById('record-quantity').value = '';
         document.getElementById('record-unit').value = '';
         document.getElementById('record-brand').value = '';
+
+        // 关闭模态框
+        const modal = bootstrap.Modal.getInstance(document.getElementById('addShoppingItemModal'));
+        if (modal) {
+            modal.hide();
+        }
+
+        fetchAllShoppingItems();
+    }
+
+    // 打开购物项编辑模态框
+    function openEditShoppingItemModal(item) {
+        const modal = new bootstrap.Modal(document.getElementById('addShoppingItemModal'));
+        const modalTitle = document.getElementById('addShoppingItemModalLabel');
+        const confirmButton = document.querySelector('#addShoppingItemModal .btn-primary');
+
+        modalTitle.textContent = '编辑购物项';
+        document.getElementById('record-input').value = item.content;
+        document.getElementById('record-quantity').value = item.quantity || '';
+        document.getElementById('record-unit').value = item.unit || '';
+        document.getElementById('record-brand').value = item.brand || '';
+
+        confirmButton.textContent = '确认修改';
+        confirmButton.onclick = () => updateShoppingItem(item.id);
+        
+        modal.show();
+    }
+
+    // 重置模态框为“添加”状态
+    document.getElementById('addShoppingItemModal').addEventListener('hidden.bs.modal', event => {
+        const modalTitle = document.getElementById('addShoppingItemModalLabel');
+        const confirmButton = document.querySelector('#addShoppingItemModal .btn-primary');
+        
+        modalTitle.textContent = '添加购物项';
+        document.getElementById('record-input').value = '';
+        document.getElementById('record-quantity').value = '';
+        document.getElementById('record-unit').value = '';
+        document.getElementById('record-brand').value = '';
+        
+        confirmButton.textContent = '确认添加';
+        confirmButton.onclick = addShoppingItem;
+    });
+
+    // 更新购物项
+    async function updateShoppingItem(id) {
+        const payload = {
+            content: document.getElementById('record-input').value,
+            quantity: document.getElementById('record-quantity').value,
+            unit: document.getElementById('record-unit').value,
+            brand: document.getElementById('record-brand').value,
+            category: CATEGORY
+        };
+
+        if (!payload.content) return alert('物品名称不能为空！');
+
+        await fetch(`/api/records/${id}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+        });
+
+        const modal = bootstrap.Modal.getInstance(document.getElementById('addShoppingItemModal'));
+        modal.hide();
+
         fetchAllShoppingItems();
     }
 

@@ -12,6 +12,9 @@
         .main-content { min-height: 80vh; }
         .delete-btn { color: red; cursor: pointer; text-decoration: none; }
         .record-meta { font-size: 0.85em; color: #6c757d; }
+        .category-card { transition: transform 0.2s ease-in-out, box-shadow 0.2s ease-in-out; }
+        .category-card:hover { transform: translateY(-5px); box-shadow: 0 4px 15px rgba(0,0,0,0.1); }
+        .category-card a::after { content: ""; position: absolute; top: 0; right: 0; bottom: 0; left: 0; }
     </style>
     {% block head_script %}{% endblock %}
 </head>

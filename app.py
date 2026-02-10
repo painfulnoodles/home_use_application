@@ -42,6 +42,8 @@ def init_db():
         cursor.execute('ALTER TABLE records ADD COLUMN style TEXT')
     if 'needs_purchase' not in columns: # 是否需要购买
         cursor.execute('ALTER TABLE records ADD COLUMN needs_purchase INTEGER DEFAULT 0')
+    if 'dosage' not in columns: # 药品用量
+        cursor.execute('ALTER TABLE records ADD COLUMN dosage TEXT')
 
 
     # 创建 records 表（如果不存在）
@@ -54,7 +56,8 @@ def init_db():
             status TEXT NOT NULL DEFAULT "pending",
             quantity TEXT, unit TEXT, brand TEXT,
             person_id INTEGER, type TEXT, color TEXT,
-            frequency TEXT, style TEXT, needs_purchase INTEGER DEFAULT 0
+            frequency TEXT, style TEXT, needs_purchase INTEGER DEFAULT 0,
+            dosage TEXT
         )
     ''')
 
@@ -101,6 +104,45 @@ def add_person():
         conn.close()
     return jsonify({"status": "success"}), 201
 
+@app.route('/api/people/<int:person_id>', methods=['DELETE'])
+def delete_person(person_id):
+    conn = sqlite3.connect('database.db')
+    cursor = conn.cursor()
+    try:
+        # 首先，删除与该人物相关的所有记录（例如衣物、药品）
+        cursor.execute("DELETE FROM records WHERE person_id = ?", (person_id,))
+        # 然后，删除人物本身
+        cursor.execute("DELETE FROM people WHERE id = ?", (person_id,))
+        conn.commit()
+    except sqlite3.Error as e:
+        conn.rollback()
+        return jsonify({"error": str(e)}), 500
+    finally:
+        conn.close()
+    return jsonify({"status": "success"})
+
+# 新增路由: 获取特定人物的详细信息（衣物和药品）
+@app.route('/api/people/<int:person_id>/details', methods=['GET'])
+def get_person_details(person_id):
+    conn = sqlite3.connect('database.db')
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+
+    # 获取衣物
+    cursor.execute("SELECT * FROM records WHERE person_id = ? AND category = 'clothes'", (person_id,))
+    clothes = [dict(row) for row in cursor.fetchall()]
+
+    # 获取药品
+    cursor.execute("SELECT * FROM records WHERE person_id = ? AND category = 'medicine'", (person_id,))
+    medicines = [dict(row) for row in cursor.fetchall()]
+
+    conn.close()
+    return jsonify({
+        "clothes": clothes,
+        "medicines": medicines
+    })
+
+
 # --- 记录 API ---
 
 # 路由1: 获取记录
@@ -127,7 +169,7 @@ def get_records():
         records = list(items_by_person.values())
     elif category == 'medicine':
         # 特殊处理药品清单，按人物分组
-        cursor.execute("SELECT p.id as person_id, p.name as person_name, r.id, r.content, r.frequency, r.style, r.color, r.needs_purchase FROM records r JOIN people p ON r.person_id = p.id WHERE r.category = 'medicine' ORDER BY p.name, r.id")
+        cursor.execute("SELECT p.id as person_id, p.name as person_name, r.id, r.content, r.frequency, r.style, r.color, r.needs_purchase, r.dosage FROM records r JOIN people p ON r.person_id = p.id WHERE r.category = 'medicine' ORDER BY p.name, r.id")
         items_by_person = {}
         for row in cursor.fetchall():
             person_id = row['person_id']
@@ -140,7 +182,19 @@ def get_records():
         records = list(items_by_person.values())
     else:
         status = request.args.get('status', 'pending')
-        cursor.execute("SELECT * FROM records WHERE category = ? AND status = ? ORDER BY id DESC", (category, status))
+        # 按日期降序，然后按紧急程度（高->中->低）排序
+        cursor.execute("""
+            SELECT * FROM records 
+            WHERE category = ? AND status = ? 
+            ORDER BY 
+                date DESC, 
+                CASE urgency 
+                    WHEN '高' THEN 1 
+                    WHEN '中' THEN 2 
+                    WHEN '低' THEN 3 
+                    ELSE 4 
+                END
+        """, (category, status))
         records = [dict(row) for row in cursor.fetchall()]
         
     conn.close()
@@ -164,8 +218,8 @@ def add_record():
     elif category == 'medicine':
         # 添加药品记录
         cursor.execute(
-            "INSERT INTO records (content, category, person_id, frequency, style, color) VALUES (?, ?, ?, ?, ?, ?)",
-            (record_data['content'], 'medicine', record_data['person_id'], record_data['frequency'], record_data['style'], record_data['color'])
+            "INSERT INTO records (content, category, person_id, frequency, style, color, dosage) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (record_data['content'], 'medicine', record_data['person_id'], record_data['frequency'], record_data['style'], record_data['color'], record_data.get('dosage'))
         )
     else:
         # 添加其他记录
@@ -221,6 +275,45 @@ def clear_shopping_list():
     conn.close()
     return jsonify({"status": "success"})
 
+# 新增路由: 更新一条记录
+@app.route('/api/records/<int:record_id>', methods=['PUT'])
+def update_record(record_id):
+    data = request.get_json()
+    category = data.get('category', 'general')
+
+    conn = sqlite3.connect('database.db')
+    cursor = conn.cursor()
+
+    try:
+        if category == 'general':
+            cursor.execute(
+                "UPDATE records SET content=?, date=?, time=?, urgency=? WHERE id=?",
+                (data['content'], data['date'], data['time'], data['urgency'], record_id)
+            )
+        elif category == 'shopping':
+            cursor.execute(
+                "UPDATE records SET content=?, quantity=?, unit=?, brand=? WHERE id=?",
+                (data['content'], data.get('quantity'), data.get('unit'), data.get('brand'), record_id)
+            )
+        elif category == 'clothes':
+            cursor.execute(
+                "UPDATE records SET person_id=?, content=?, type=?, color=?, quantity=? WHERE id=?",
+                (data['person_id'], data['content'], data['type'], data['color'], data['quantity'], record_id)
+            )
+        elif category == 'medicine':
+            cursor.execute(
+                "UPDATE records SET person_id=?, content=?, frequency=?, dosage=?, style=?, color=? WHERE id=?",
+                (data['person_id'], data['content'], data.get('frequency'), data.get('dosage'), data['style'], data['color'], record_id)
+            )
+        conn.commit()
+    except sqlite3.Error as e:
+        conn.rollback()
+        return jsonify({"error": str(e)}), 500
+    finally:
+        conn.close()
+    
+    return jsonify({"status": "success"})
+
 
 # 路由3: 删除一条记录
 @app.route('/api/records/<int:record_id>', methods=['DELETE'])
@@ -242,7 +335,7 @@ def index():
 @app.route('/<page_name>')
 def show_page(page_name):
     # 动态渲染页面，避免为每个页面都写一个路由
-    if page_name in ['medicine', 'clothes', 'shopping']:
+    if page_name in ['medicine', 'clothes', 'shopping', 'people']:
         return render_template(f'{page_name}.html')
     return "Page not found", 404
 
