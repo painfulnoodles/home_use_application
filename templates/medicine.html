@@ -2,32 +2,88 @@
 
 {% block title %}药品记录{% endblock %}
 
+{% block head_script %}
+<style>
+    .medicine-icon {
+        display: inline-block;
+        width: 24px;
+        height: 12px;
+        border-radius: 6px;
+        margin-right: 8px;
+        vertical-align: middle;
+        border: 1px solid rgba(0,0,0,0.2);
+    }
+    .medicine-icon.tablet {
+        width: 16px;
+        height: 16px;
+        border-radius: 50%;
+    }
+</style>
+{% endblock %}
+
+
 {% block content %}
 <a href="/" class="btn btn-sm btn-outline-secondary mb-3">&lt; 返回主页</a>
-<div class="card">
-    <div class="card-body">
-        <h1 class="card-title">药品记录</h1>
-        <div class="row g-2 mb-3">
-            <div class="col-md-6">
-                <input type="text" id="record-input" class="form-control" placeholder="例如：布洛芬">
-            </div>
-            <div class="col-md-2">
-                <input type="date" id="record-date" class="form-control">
-            </div>
-            <div class="col-md-2">
-                <input type="time" id="record-time" class="form-control">
-            </div>
-            <div class="col-md-2">
-                <select id="record-urgency" class="form-select">
-                    <option value="低">低</option>
-                    <option value="中">中</option>
-                    <option value="高">高</option>
-                </select>
+
+<div class="row">
+    <!-- 左侧：表单 -->
+    <div class="col-md-4">
+        <!-- 添加人物 -->
+        <div class="card mb-4">
+            <div class="card-body">
+                <h5 class="card-title">创建人物</h5>
+                <div class="input-group">
+                    <input type="text" id="person-name-input" class="form-control" placeholder="人物名称">
+                    <button class="btn btn-outline-secondary" onclick="addPerson()">添加</button>
+                </div>
             </div>
         </div>
-        <button class="btn btn-primary" type="button" onclick="addRecord(CATEGORY)">添加</button>
-        <hr>
-        <ul id="record-list" class="list-group"></ul>
+
+        <!-- 添加药品 -->
+        <div class="card">
+            <div class="card-body">
+                <h5 class="card-title">添加药品</h5>
+                <div class="mb-3">
+                    <label for="person-select" class="form-label">所属人物</label>
+                    <select id="person-select" class="form-select"></select>
+                </div>
+                <div class="mb-3">
+                    <label for="medicine-content-input" class="form-label">药品名称</label>
+                    <input type="text" id="medicine-content-input" class="form-control" placeholder="例如: 布洛芬">
+                </div>
+                <div class="mb-3">
+                    <label for="medicine-frequency-input" class="form-label">用药频率</label>
+                    <input type="text" id="medicine-frequency-input" class="form-control" placeholder="例如: 每天3次">
+                </div>
+                <div class="row g-2 mb-3">
+                    <div class="col">
+                        <label for="medicine-style-select" class="form-label">样式</label>
+                        <select id="medicine-style-select" class="form-select">
+                            <option value="capsule">胶囊</option>
+                            <option value="tablet">药片</option>
+                        </select>
+                    </div>
+                    <div class="col">
+                        <label for="medicine-color-input" class="form-label">颜色</label>
+                        <input type="color" id="medicine-color-input" class="form-control form-control-color" value="#FFFFFF" title="选择颜色">
+                    </div>
+                </div>
+                <button class="btn btn-primary w-100" onclick="addMedicine()">添加药品</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 右侧：显示列表 -->
+    <div class="col-md-8">
+        <div class="card mb-3">
+            <div class="card-header">需要购买的药品</div>
+            <ul id="needs-purchase-list" class="list-group list-group-flush">
+                <li class="list-group-item text-muted">暂无需要购买的药品。</li>
+            </ul>
+        </div>
+        <div id="medicine-display-area">
+            <!-- 按人物分类的药品列表将在这里动态生成 -->
+        </div>
     </div>
 </div>
 {% endblock %}
@@ -35,13 +91,153 @@
 {% block body_script %}
 <script>
     const CATEGORY = 'medicine';
-    window.onload = () => {
-        fetchRecords(CATEGORY);
-        const now = new Date();
-        const date = now.toISOString().split('T')[0];
-        const time = now.toTimeString().split(' ')[0].substring(0, 5);
-        document.getElementById('record-date').value = date;
-        document.getElementById('record-time').value = time;
+
+    // 获取并填充人物下拉列表
+    async function fetchAndPopulatePeople() {
+        const response = await fetch('/api/people');
+        const people = await response.json();
+        const select = document.getElementById('person-select');
+        select.innerHTML = '<option selected disabled>请选择人物...</option>';
+        people.forEach(person => {
+            const option = document.createElement('option');
+            option.value = person.id;
+            option.textContent = person.name;
+            select.appendChild(option);
+        });
+    }
+
+    // 添加新人物
+    async function addPerson() {
+        const nameInput = document.getElementById('person-name-input');
+        const name = nameInput.value.trim();
+        if (!name) return alert('人物名称不能为空！');
+
+        const response = await fetch('/api/people', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ name })
+        });
+
+        if (response.ok) {
+            nameInput.value = '';
+            await fetchAndPopulatePeople();
+        } else {
+            const error = await response.json();
+            alert(`添加失败: ${error.error}`);
+        }
+    }
+
+    // 添加新药品
+    async function addMedicine() {
+        const payload = {
+            person_id: document.getElementById('person-select').value,
+            content: document.getElementById('medicine-content-input').value,
+            frequency: document.getElementById('medicine-frequency-input').value,
+            style: document.getElementById('medicine-style-select').value,
+            color: document.getElementById('medicine-color-input').value,
+            category: CATEGORY
+        };
+
+        if (!payload.person_id || !payload.content) {
+            return alert('请选择人物并填写药品名称！');
+        }
+
+        await fetch('/api/records', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+        });
+
+        // 清空输入框
+        document.getElementById('medicine-content-input').value = '';
+        document.getElementById('medicine-frequency-input').value = '';
+
+        await fetchAndDisplayMedicines();
+    }
+    
+    // 删除记录
+    async function deleteMedicine(id) {
+        if (!confirm('确定要删除这个药品记录吗？')) return;
+        await fetch(`/api/records/${id}`, { method: 'DELETE' });
+        await fetchAndDisplayMedicines();
+    }
+
+    // 切换购买需求
+    async function toggleNeedsPurchase(id, currentState) {
+        await fetch(`/api/records/${id}/purchase`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ needs_purchase: !currentState })
+        });
+        await fetchAndDisplayMedicines();
+    }
+
+    // 获取并显示药品
+    async function fetchAndDisplayMedicines() {
+        const response = await fetch(`/api/records?category=${CATEGORY}`);
+        const peopleWithMedicines = await response.json();
+        const displayArea = document.getElementById('medicine-display-area');
+        const purchaseList = document.getElementById('needs-purchase-list');
+        displayArea.innerHTML = '';
+        purchaseList.innerHTML = '';
+        let needsPurchaseCount = 0;
+
+        if (peopleWithMedicines.length === 0) {
+            displayArea.innerHTML = '<p class="text-muted">还没有任何药品记录。</p>';
+        }
+
+        peopleWithMedicines.forEach(person => {
+            const personCard = document.createElement('div');
+            personCard.className = 'card mb-3';
+            
+            let itemsHtml = '<ul class="list-group list-group-flush">';
+            person.items.forEach(item => {
+                const iconHtml = `<span class="medicine-icon ${item.style}" style="background-color: ${item.color};"></span>`;
+                const purchaseBtnText = item.needs_purchase ? '取消购买' : '需要购买';
+                const purchaseBtnClass = item.needs_purchase ? 'btn-secondary' : 'btn-warning';
+
+                itemsHtml += `
+                    <li class="list-group-item d-flex justify-content-between align-items-center">
+                        <div>
+                            ${iconHtml}
+                            <strong>${item.content}</strong>
+                            <small class="text-muted d-block">${item.frequency || ''}</small>
+                        </div>
+                        <div>
+                            <button class="btn btn-sm ${purchaseBtnClass} me-2" onclick="toggleNeedsPurchase(${item.id}, ${item.needs_purchase})">${purchaseBtnText}</button>
+                            <a href="#" class="delete-btn" onclick="deleteMedicine(${item.id})">删除</a>
+                        </div>
+                    </li>
+                `;
+
+                if (item.needs_purchase) {
+                    needsPurchaseCount++;
+                    const purchaseLi = document.createElement('li');
+                    purchaseLi.className = 'list-group-item';
+                    purchaseLi.innerHTML = `${iconHtml} <strong>${item.content}</strong> (属于: ${person.person_name})`;
+                    purchaseList.appendChild(purchaseLi);
+                }
+            });
+            itemsHtml += '</ul>';
+
+            personCard.innerHTML = `
+                <div class="card-header">
+                    <h5>${person.person_name}</h5>
+                </div>
+                ${itemsHtml}
+            `;
+            displayArea.appendChild(personCard);
+        });
+
+        if (needsPurchaseCount === 0) {
+            purchaseList.innerHTML = '<li class="list-group-item text-muted">暂无需要购买的药品。</li>';
+        }
+    }
+
+    // 页面加载时初始化
+    window.onload = async () => {
+        await fetchAndPopulatePeople();
+        await fetchAndDisplayMedicines();
     };
 </script>
 {% endblock %}

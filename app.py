@@ -35,6 +35,13 @@ def init_db():
         cursor.execute('ALTER TABLE records ADD COLUMN type TEXT')
     if 'color' not in columns: # 衣物颜色
         cursor.execute('ALTER TABLE records ADD COLUMN color TEXT')
+    # 为药品清单添加新字段
+    if 'frequency' not in columns: # 用药频率
+        cursor.execute('ALTER TABLE records ADD COLUMN frequency TEXT')
+    if 'style' not in columns: # 药品样式
+        cursor.execute('ALTER TABLE records ADD COLUMN style TEXT')
+    if 'needs_purchase' not in columns: # 是否需要购买
+        cursor.execute('ALTER TABLE records ADD COLUMN needs_purchase INTEGER DEFAULT 0')
 
 
     # 创建 records 表（如果不存在）
@@ -46,7 +53,8 @@ def init_db():
             date TEXT, time TEXT, urgency TEXT,
             status TEXT NOT NULL DEFAULT "pending",
             quantity TEXT, unit TEXT, brand TEXT,
-            person_id INTEGER, type TEXT, color TEXT
+            person_id INTEGER, type TEXT, color TEXT,
+            frequency TEXT, style TEXT, needs_purchase INTEGER DEFAULT 0
         )
     ''')
 
@@ -107,16 +115,29 @@ def get_records():
     if category == 'clothes':
         # 特殊处理衣物清单，按人物分组
         cursor.execute("SELECT p.id as person_id, p.name as person_name, r.id, r.content, r.type, r.color, r.quantity FROM records r JOIN people p ON r.person_id = p.id WHERE r.category = 'clothes' ORDER BY p.name, r.id")
-        clothes_by_person = {}
+        items_by_person = {}
         for row in cursor.fetchall():
             person_id = row['person_id']
-            if person_id not in clothes_by_person:
-                clothes_by_person[person_id] = {
+            if person_id not in items_by_person:
+                items_by_person[person_id] = {
                     "person_name": row['person_name'],
                     "items": []
                 }
-            clothes_by_person[person_id]['items'].append(dict(row))
-        records = list(clothes_by_person.values())
+            items_by_person[person_id]['items'].append(dict(row))
+        records = list(items_by_person.values())
+    elif category == 'medicine':
+        # 特殊处理药品清单，按人物分组
+        cursor.execute("SELECT p.id as person_id, p.name as person_name, r.id, r.content, r.frequency, r.style, r.color, r.needs_purchase FROM records r JOIN people p ON r.person_id = p.id WHERE r.category = 'medicine' ORDER BY p.name, r.id")
+        items_by_person = {}
+        for row in cursor.fetchall():
+            person_id = row['person_id']
+            if person_id not in items_by_person:
+                items_by_person[person_id] = {
+                    "person_name": row['person_name'],
+                    "items": []
+                }
+            items_by_person[person_id]['items'].append(dict(row))
+        records = list(items_by_person.values())
     else:
         status = request.args.get('status', 'pending')
         cursor.execute("SELECT * FROM records WHERE category = ? AND status = ? ORDER BY id DESC", (category, status))
@@ -140,6 +161,12 @@ def add_record():
             "INSERT INTO records (content, category, person_id, type, color, quantity) VALUES (?, ?, ?, ?, ?, ?)",
             (record_data['content'], 'clothes', record_data['person_id'], record_data['type'], record_data['color'], record_data['quantity'])
         )
+    elif category == 'medicine':
+        # 添加药品记录
+        cursor.execute(
+            "INSERT INTO records (content, category, person_id, frequency, style, color) VALUES (?, ?, ?, ?, ?, ?)",
+            (record_data['content'], 'medicine', record_data['person_id'], record_data['frequency'], record_data['style'], record_data['color'])
+        )
     else:
         # 添加其他记录
         cursor.execute(
@@ -147,6 +174,22 @@ def add_record():
             (record_data['content'], category, record_data.get('date'), record_data.get('time'), record_data.get('urgency'), 'pending', record_data.get('quantity'), record_data.get('unit'), record_data.get('brand'))
         )
     
+    conn.commit()
+    conn.close()
+    return jsonify({"status": "success"})
+
+# 新增路由: 切换药品购买需求状态
+@app.route('/api/records/<int:record_id>/purchase', methods=['PUT'])
+def toggle_purchase_status(record_id):
+    data = request.get_json()
+    needs_purchase = data.get('needs_purchase')
+
+    if needs_purchase is None:
+        return jsonify({"error": "needs_purchase is required"}), 400
+
+    conn = sqlite3.connect('database.db')
+    cursor = conn.cursor()
+    cursor.execute("UPDATE records SET needs_purchase = ? WHERE id = ?", (1 if needs_purchase else 0, record_id))
     conn.commit()
     conn.close()
     return jsonify({"status": "success"})
