@@ -1,0 +1,155 @@
+{% extends "base.html" %}
+
+{% block title %}购物清单{% endblock %}
+
+{% block content %}
+<a href="/" class="btn btn-sm btn-outline-secondary mb-3">&lt; 返回主页</a>
+<div class="card">
+    <div class="card-body">
+        <h1 class="card-title">添加购物项</h1>
+        <div class="row g-2">
+            <div class="col-md-4">
+                <label for="record-input" class="form-label">物品名称</label>
+                <input type="text" id="record-input" class="form-control" placeholder="例如：牛奶">
+            </div>
+            <div class="col-md-2">
+                <label for="record-quantity" class="form-label">数量（选填）</label>
+                <input type="number" id="record-quantity" class="form-control" placeholder="例如: 2">
+            </div>
+            <div class="col-md-2">
+                <label for="record-unit" class="form-label">单位（选填）</label>
+                <input type="text" id="record-unit" class="form-control" placeholder="例如: 盒">
+            </div>
+            <div class="col-md-3">
+                <label for="record-brand" class="form-label">品牌 (选填)</label>
+                <input type="text" id="record-brand" class="form-control" placeholder="例如: 光明">
+            </div>
+            <div class="col-md-1 d-flex align-items-end">
+                <button class="btn btn-primary w-100" type="button" onclick="addShoppingItem()">添加</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="row mt-4">
+    <!-- 待购买列表 -->
+    <div class="col-md-6">
+        <div class="card">
+            <div class="card-header">待购买</div>
+            <ul id="pending-list" class="list-group list-group-flush"></ul>
+        </div>
+    </div>
+    <!-- 已购买列表 -->
+    <div class="col-md-6">
+        <div class="card">
+            <div class="card-header">已购买</div>
+            <ul id="completed-list" class="list-group list-group-flush"></ul>
+        </div>
+    </div>
+</div>
+
+<div class="text-center mt-4">
+    <button class="btn btn-lg btn-danger" onclick="finishShopping()">本次购物完成 (清空列表)</button>
+</div>
+{% endblock %}
+
+{% block body_script %}
+<script>
+    const CATEGORY = 'shopping';
+
+    // 渲染列表的通用函数
+    function renderList(items, listId, isPending) {
+        const list = document.getElementById(listId);
+        list.innerHTML = '';
+        items.forEach(item => {
+            const li = document.createElement('li');
+            li.className = 'list-group-item d-flex justify-content-between align-items-center';
+            
+            const brandInfo = item.brand ? `<span class="text-muted">(${item.brand})</span>` : '';
+            const itemDetails = `${item.content} ${brandInfo} - ${item.quantity || ''} ${item.unit || ''}`;
+
+            if (isPending) {
+                li.innerHTML = `
+                    <span>${itemDetails}</span>
+                    <div>
+                        <button class="btn btn-sm btn-success me-2" onclick="markAsCompleted(${item.id})">已购买</button>
+                        <a href="#" class="delete-btn" onclick="deleteShoppingItem(${item.id})">删除</a>
+                    </div>
+                `;
+            } else {
+                li.innerHTML = `
+                    <span class="text-muted text-decoration-line-through">${itemDetails}</span>
+                    <a href="#" class="delete-btn" onclick="deleteShoppingItem(${item.id})">删除</a>
+                `;
+            }
+            list.appendChild(li);
+        });
+    }
+
+    // 获取并渲染所有购物清单项目
+    async function fetchAllShoppingItems() {
+        // 获取待购买列表
+        const pendingResponse = await fetch(`/api/records?category=${CATEGORY}&status=pending`);
+        const pendingItems = await pendingResponse.json();
+        renderList(pendingItems, 'pending-list', true);
+
+        // 获取已购买列表
+        const completedResponse = await fetch(`/api/records?category=${CATEGORY}&status=completed`);
+        const completedItems = await completedResponse.json();
+        renderList(completedItems, 'completed-list', false);
+    }
+
+    // 添加新的购物项
+    async function addShoppingItem() {
+        const content = document.getElementById('record-input').value;
+        const quantity = document.getElementById('record-quantity').value;
+        const unit = document.getElementById('record-unit').value;
+        const brand = document.getElementById('record-brand').value;
+
+        if (!content) return alert('物品名称不能为空！');
+
+        await fetch('/api/records', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ content, quantity, unit, brand, category: CATEGORY })
+        });
+        
+        document.getElementById('record-input').value = '';
+        document.getElementById('record-quantity').value = '';
+        document.getElementById('record-unit').value = '';
+        document.getElementById('record-brand').value = '';
+        fetchAllShoppingItems();
+    }
+
+    // 标记为已购买
+    async function markAsCompleted(id) {
+        await fetch(`/api/records/${id}/status`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ status: 'completed' })
+        });
+        fetchAllShoppingItems();
+    }
+
+    // 删除购物项
+    async function deleteShoppingItem(id) {
+        if (!confirm('确定要删除这个物品吗？')) return;
+        
+        await fetch(`/api/records/${id}`, { method: 'DELETE' });
+        
+        fetchAllShoppingItems();
+    }
+
+    // 本次购物完成，清空所有列表
+    async function finishShopping() {
+        if (!confirm('确定要清空所有购物清单项目吗？此操作不可恢复。')) return;
+
+        await fetch('/api/shopping/clear', { method: 'POST' });
+
+        fetchAllShoppingItems();
+    }
+
+    // 页面加载时获取所有数据
+    window.onload = () => fetchAllShoppingItems();
+</script>
+{% endblock %}

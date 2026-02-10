@@ -1,0 +1,58 @@
+{% extends "base.html" %}
+
+{% block title %}我的记录本 - 主页{% endblock %}
+
+{% block content %}
+<div class="card">
+    <div class="card-body">
+        <h2 class="card-title">分类记录</h2>
+        <ul class="list-group list-group-flush">
+            <li class="list-group-item"><a href="/medicine">药品记录</a></li>
+            <li class="list-group-item"><a href="/clothes">衣服清单</a></li>
+            <li class="list-group-item"><a href="/shopping">购物清单</a></li>
+        </ul>
+    </div>
+</div>
+
+<div class="card mt-4">
+    <div class="card-body">
+        <h2 class="card-title">通用记录</h2>
+        <div class="row g-2 mb-3">
+            <div class="col-md-6">
+                <input type="text" id="record-input" class="form-control" placeholder="例如：买一件新衣服">
+            </div>
+            <div class="col-md-2">
+                <input type="date" id="record-date" class="form-control">
+            </div>
+            <div class="col-md-2">
+                <input type="time" id="record-time" class="form-control">
+            </div>
+            <div class="col-md-2">
+                <select id="record-urgency" class="form-select">
+                    <option value="低">低</option>
+                    <option value="中">中</option>
+                    <option value="高">高</option>
+                </select>
+            </div>
+        </div>
+        <button class="btn btn-primary" type="button" onclick="addRecord('general')">添加</button>
+        <hr>
+        <ul id="record-list" class="list-group">
+            <!-- 记录将在这里动态显示 -->
+        </ul>
+    </div>
+</div>
+{% endblock %}
+
+{% block body_script %}
+<script>
+    window.onload = () => {
+        fetchRecords('general');
+        const now = new Date();
+        const date = now.toISOString().split('T')[0];
+        const time = now.toTimeString().split(' ')[0].substring(0, 5);
+        document.getElementById('record-date').value = date;
+        document.getElementById('record-time').value = time;
+    };
+</script>
+{% endblock %}

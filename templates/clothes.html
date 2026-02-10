@@ -1,0 +1,186 @@
+{% extends "base.html" %}
+
+{% block title %}衣服清单{% endblock %}
+
+{% block content %}
+<a href="/" class="btn btn-sm btn-outline-secondary mb-3">&lt; 返回主页</a>
+
+<div class="row">
+    <!-- 左侧：添加表单 -->
+    <div class="col-md-4">
+        <!-- 添加人物 -->
+        <div class="card mb-4">
+            <div class="card-body">
+                <h5 class="card-title">创建人物</h5>
+                <div class="input-group">
+                    <input type="text" id="person-name-input" class="form-control" placeholder="人物名称">
+                    <button class="btn btn-outline-secondary" onclick="addPerson()">添加</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- 添加衣服 -->
+        <div class="card">
+            <div class="card-body">
+                <h5 class="card-title">添加衣服</h5>
+                <div class="mb-3">
+                    <label for="person-select" class="form-label">所属人物</label>
+                    <select id="person-select" class="form-select"></select>
+                </div>
+                <div class="mb-3">
+                    <label for="cloth-content-input" class="form-label">衣物名称</label>
+                    <input type="text" id="cloth-content-input" class="form-control" placeholder="例如: 圆领T恤">
+                </div>
+                <div class="row g-2 mb-3">
+                    <div class="col">
+                        <label for="cloth-type-input" class="form-label">类型</label>
+                        <input type="text" id="cloth-type-input" class="form-control" placeholder="例如: 上衣">
+                    </div>
+                    <div class="col">
+                        <label for="cloth-color-input" class="form-label">颜色</label>
+                        <input type="text" id="cloth-color-input" class="form-control" placeholder="例如: 白色">
+                    </div>
+                </div>
+                <div class="mb-3">
+                    <label for="cloth-quantity-input" class="form-label">数量</label>
+                    <input type="number" id="cloth-quantity-input" class="form-control" value="1">
+                </div>
+                <button class="btn btn-primary w-100" onclick="addCloth()">添加衣服</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 右侧：显示列表 -->
+    <div class="col-md-8">
+        <div id="clothes-display-area">
+            <!-- 按人物分类的衣物列表将在这里动态生成 -->
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block body_script %}
+<script>
+    const CATEGORY = 'clothes';
+
+    // 获取并填充人物下拉列表
+    async function fetchAndPopulatePeople() {
+        const response = await fetch('/api/people');
+        const people = await response.json();
+        const select = document.getElementById('person-select');
+        select.innerHTML = '<option selected disabled>请选择人物...</option>';
+        people.forEach(person => {
+            const option = document.createElement('option');
+            option.value = person.id;
+            option.textContent = person.name;
+            select.appendChild(option);
+        });
+    }
+
+    // 添加新人物
+    async function addPerson() {
+        const nameInput = document.getElementById('person-name-input');
+        const name = nameInput.value.trim();
+        if (!name) return alert('人物名称不能为空！');
+
+        const response = await fetch('/api/people', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ name })
+        });
+
+        if (response.ok) {
+            nameInput.value = '';
+            await fetchAndPopulatePeople();
+        } else {
+            const error = await response.json();
+            alert(`添加失败: ${error.error}`);
+        }
+    }
+
+    // 添加新衣服
+    async function addCloth() {
+        const payload = {
+            person_id: document.getElementById('person-select').value,
+            content: document.getElementById('cloth-content-input').value,
+            type: document.getElementById('cloth-type-input').value,
+            color: document.getElementById('cloth-color-input').value,
+            quantity: document.getElementById('cloth-quantity-input').value,
+            category: CATEGORY
+        };
+
+        if (!payload.person_id || !payload.content || !payload.type || !payload.color || !payload.quantity) {
+            return alert('请填写所有衣物信息！');
+        }
+
+        await fetch('/api/records', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+        });
+
+        // 清空输入框
+        document.getElementById('cloth-content-input').value = '';
+        document.getElementById('cloth-type-input').value = '';
+        document.getElementById('cloth-color-input').value = '';
+        document.getElementById('cloth-quantity-input').value = '1';
+
+        await fetchAndDisplayClothes();
+    }
+    
+    // 删除记录（通用）
+    async function deleteCloth(id) {
+        if (!confirm('确定要删除这件衣服吗？')) return;
+        await fetch(`/api/records/${id}`, { method: 'DELETE' });
+        await fetchAndDisplayClothes();
+    }
+
+    // 获取并按人物分组显示衣物
+    async function fetchAndDisplayClothes() {
+        const response = await fetch(`/api/records?category=${CATEGORY}`);
+        const peopleWithClothes = await response.json();
+        const displayArea = document.getElementById('clothes-display-area');
+        displayArea.innerHTML = '';
+
+        if (peopleWithClothes.length === 0) {
+            displayArea.innerHTML = '<p class="text-muted">还没有任何衣物记录。</p>';
+            return;
+        }
+
+        peopleWithClothes.forEach(person => {
+            const personCard = document.createElement('div');
+            personCard.className = 'card mb-3';
+            
+            let itemsHtml = '<ul class="list-group list-group-flush">';
+            person.items.forEach(item => {
+                itemsHtml += `
+                    <li class="list-group-item d-flex justify-content-between align-items-center">
+                        <div>
+                            <strong>${item.content}</strong> (${item.type}, ${item.color})
+                        </div>
+                        <div>
+                            <span class="badge bg-secondary me-3">${item.quantity} 件/对</span>
+                            <a href="#" class="delete-btn" onclick="deleteCloth(${item.id})">删除</a>
+                        </div>
+                    </li>
+                `;
+            });
+            itemsHtml += '</ul>';
+
+            personCard.innerHTML = `
+                <div class="card-header">
+                    <h5>${person.person_name}</h5>
+                </div>
+                ${itemsHtml}
+            `;
+            displayArea.appendChild(personCard);
+        });
+    }
+
+    // 页面加载时初始化
+    window.onload = async () => {
+        await fetchAndPopulatePeople();
+        await fetchAndDisplayClothes();
+    };
+</script>
+{% endblock %}

@@ -1,0 +1,47 @@
+{% extends "base.html" %}
+
+{% block title %}药品记录{% endblock %}
+
+{% block content %}
+<a href="/" class="btn btn-sm btn-outline-secondary mb-3">&lt; 返回主页</a>
+<div class="card">
+    <div class="card-body">
+        <h1 class="card-title">药品记录</h1>
+        <div class="row g-2 mb-3">
+            <div class="col-md-6">
+                <input type="text" id="record-input" class="form-control" placeholder="例如：布洛芬">
+            </div>
+            <div class="col-md-2">
+                <input type="date" id="record-date" class="form-control">
+            </div>
+            <div class="col-md-2">
+                <input type="time" id="record-time" class="form-control">
+            </div>
+            <div class="col-md-2">
+                <select id="record-urgency" class="form-select">
+                    <option value="低">低</option>
+                    <option value="中">中</option>
+                    <option value="高">高</option>
+                </select>
+            </div>
+        </div>
+        <button class="btn btn-primary" type="button" onclick="addRecord(CATEGORY)">添加</button>
+        <hr>
+        <ul id="record-list" class="list-group"></ul>
+    </div>
+</div>
+{% endblock %}
+
+{% block body_script %}
+<script>
+    const CATEGORY = 'medicine';
+    window.onload = () => {
+        fetchRecords(CATEGORY);
+        const now = new Date();
+        const date = now.toISOString().split('T')[0];
+        const time = now.toTimeString().split(' ')[0].substring(0, 5);
+        document.getElementById('record-date').value = date;
+        document.getElementById('record-time').value = time;
+    };
+</script>
+{% endblock %}
