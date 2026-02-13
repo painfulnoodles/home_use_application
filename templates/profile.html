@@ -5,10 +5,21 @@
 {% block content %}
 <div class="d-flex justify-content-between align-items-center mb-3">
     <a href="/" class="btn btn-sm btn-outline-secondary">&lt; 返回主页</a>
-    <h1 class="mb-0">个人中心 - 已完成的记录</h1>
+    <h1 class="mb-0">个人中心</h1>
     <div></div>
 </div>
 
+<!-- 新增：头像修改区域 -->
+<div class="card mb-4">
+    <div class="card-body text-center">
+        <img id="profile-avatar" src="" class="rounded-circle mb-3" width="120" height="120" alt="User Avatar" style="cursor: pointer;" onclick="document.getElementById('avatar-upload-input').click();">
+        <h5 id="profile-username"></h5>
+        <p class="text-muted">点击头像更换</p>
+        <input type="file" id="avatar-upload-input" class="d-none" accept="image/*" onchange="uploadAvatar()">
+    </div>
+</div>
+
+<h3 class="mb-3">已完成的记录</h3>
 <div id="completed-records-list" class="list-group">
     <!-- 已完成的记录将在这里动态生成 -->
 </div>
@@ -47,6 +58,40 @@
 
 {% block body_script %}
 <script>
+    // 新增：获取当前用户信息并填充
+    async function fetchUserInfo() {
+        const response = await fetch('/api/user/current');
+        const user = await response.json();
+        document.getElementById('profile-avatar').src = user.avatar ? `/${user.avatar}` : 'https://via.placeholder.com/120';
+        document.getElementById('profile-username').textContent = user.username;
+    }
+
+    // 新增：上传头像的函数
+    async function uploadAvatar() {
+        const input = document.getElementById('avatar-upload-input');
+        if (input.files.length === 0) return;
+
+        const formData = new FormData();
+        formData.append('avatar', input.files[0]);
+
+        const response = await fetch('/api/user/avatar', {
+            method: 'POST',
+            body: formData
+        });
+
+        if (response.ok) {
+            const result = await response.json();
+            // 更新页面上的头像
+            document.getElementById('profile-avatar').src = result.avatar_url;
+            // 更新导航栏的头像
+            document.getElementById('user-avatar').src = result.avatar_url;
+            alert('头像更新成功！');
+        } else {
+            const error = await response.json();
+            alert(`上传失败: ${error.error}`);
+        }
+    }
+
     async function fetchAndRenderCompletedRecords() {
         const response = await fetch('/api/records/completed');
         const records = await response.json();
@@ -157,6 +202,7 @@
 
     document.addEventListener('DOMContentLoaded', () => {
         if (['/login', '/register'].includes(window.location.pathname)) return;
+        fetchUserInfo(); // <-- 新增调用
         fetchAndRenderCompletedRecords();
     });
 </script>

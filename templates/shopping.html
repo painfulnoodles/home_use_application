@@ -118,6 +118,8 @@
                 li.innerHTML = `
                     <div class="text-decoration-line-through">${itemDetails}</div>
                     <div>
+                        <!-- *** 新增恢复按钮 *** -->
+                        <button class="btn btn-sm btn-outline-warning me-2" onclick="markAsPending(${item.id})">恢复</button>
                         <button class="btn btn-sm btn-outline-primary me-2" onclick='openEditShoppingItemModal(${JSON.stringify(item)})'>编辑</button>
                         <a href="#" class="delete-btn" onclick="deleteShoppingItem(${item.id})">删除</a>
                     </div>
@@ -252,6 +254,16 @@
             method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ status: 'completed' })
+        });
+        fetchAllShoppingItems();
+    }
+
+    // *** 新增函数：标记为待购买（恢复） ***
+    async function markAsPending(id) {
+        await fetch(`/api/records/${id}/status`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ status: 'pending' })
         });
         fetchAllShoppingItems();
     }

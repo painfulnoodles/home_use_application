@@ -1,5 +1,6 @@
 from flask import Flask, request, jsonify, render_template, redirect, url_for
 import sqlite3
+import os # <--- 1. 确保导入 os 模块
 from datetime import datetime
 from werkzeug.security import generate_password_hash, check_password_hash
 from flask_login import LoginManager, login_user, logout_user, login_required, current_user
@@ -156,6 +157,47 @@ def get_current_user_info():
         "avatar": current_user.avatar,
         "id": current_user.id
     })
+
+# --- 新增：处理头像上传的 API ---
+@app.route('/api/user/avatar', methods=['POST'])
+@login_required
+def upload_avatar():
+    if 'avatar' not in request.files:
+        return jsonify({"error": "没有文件部分"}), 400
+    
+    file = request.files['avatar']
+    if file.filename == '':
+        return jsonify({"error": "没有选择文件"}), 400
+
+    if file:
+        # 确保 uploads 目录存在
+        upload_folder = 'uploads'
+        if not os.path.exists(upload_folder):
+            os.makedirs(upload_folder)
+
+        # 为了安全，生成一个唯一的文件名
+        import uuid
+        filename = str(uuid.uuid4()) + os.path.splitext(file.filename)[1]
+        filepath = os.path.join(upload_folder, filename)
+        file.save(filepath)
+
+        # 更新数据库中的头像路径
+        conn = _get_db_conn()
+        cursor = conn.cursor()
+        try:
+            cursor.execute("UPDATE users SET avatar = ? WHERE id = ?", (filepath, current_user.id))
+            conn.commit()
+        except sqlite3.Error as e:
+            conn.rollback()
+            return jsonify({"error": str(e)}), 500
+        finally:
+            conn.close()
+        
+        # 返回新的头像路径，以便前端更新
+        return jsonify({"status": "success", "avatar_url": f"/{filepath}"})
+
+    return jsonify({"error": "文件上传失败"}), 500
+
 
 # **新增**: 获取已完成的记录
 @app.route('/api/records/completed', methods=['GET'])
@@ -326,32 +368,36 @@ def get_records():
                 items_by_person[person_id] = {"person_id": person_id, "person_name": row['person_name'], "items": []}
             items_by_person[person_id]['items'].append(row)
         records = list(items_by_person.values())
-    else:
+    elif category == 'shopping':
+        # **新增**: 为购物清单单独处理
         status = request.args.get('status', 'pending')
+        query = "SELECT * FROM records WHERE category = ? AND status = ? AND user_id = ? ORDER BY id DESC"
+        cursor.execute(query, (category, status, user_id))
+        records = [dict(row) for row in cursor.fetchall()]
+    else: # category == 'general'
         medicine_reminders = []
-        if category == 'general' and status == 'pending':
-            today_str = datetime.now().strftime('%Y-%m-%d')
-            cursor.execute("SELECT r.id, p.name, r.content, r.total_quantity, r.reminder_threshold FROM records r JOIN people p ON r.person_id = p.id WHERE r.category = 'medicine' AND r.user_id = ?", (user_id,))
-            for med_row_obj in cursor.fetchall():
-                med_row = dict(med_row_obj)
-                if med_row['total_quantity'] is not None and med_row['reminder_threshold'] is not None and med_row['total_quantity'] < med_row['reminder_threshold']:
-                    reminder_content = f"库存警告: {med_row['name']}的'{med_row['content']}'数量不足 (剩余{med_row['total_quantity']}片, 阈值{med_row['reminder_threshold']}片)"
-                    medicine_reminders.append({"id": f"med_{med_row['id']}", "content": reminder_content, "category": "general", "date": today_str, "time": "08:00", "urgency": "高", "status": "pending", "is_medicine_reminder": True, "original_medicine_id": med_row['id']})
+        # 只有在获取 'pending' 状态的通用记录时才检查药品库存
+        # (因为药品提醒总是 'pending' 状态)
+        today_str = datetime.now().strftime('%Y-%m-%d')
+        cursor.execute("SELECT r.id, p.name, r.content, r.total_quantity, r.reminder_threshold FROM records r JOIN people p ON r.person_id = p.id WHERE r.category = 'medicine' AND r.user_id = ?", (user_id,))
+        for med_row_obj in cursor.fetchall():
+            med_row = dict(med_row_obj)
+            if med_row['total_quantity'] is not None and med_row['reminder_threshold'] is not None and med_row['total_quantity'] < med_row['reminder_threshold']:
+                reminder_content = f"库存警告: {med_row['name']}的'{med_row['content']}'数量不足 (剩余{med_row['total_quantity']}片, 阈值{med_row['reminder_threshold']}片)"
+                medicine_reminders.append({"id": f"med_{med_row['id']}", "content": reminder_content, "category": "general", "date": today_str, "time": "08:00", "urgency": "高", "status": "pending", "is_medicine_reminder": True, "original_medicine_id": med_row['id']})
 
-        # **关键修复**: 恢复并调整排序逻辑
-        sort_by = request.args.get('sort_by', 'urgency') # 默认为按紧急度排序
+        sort_by = request.args.get('sort_by', 'urgency')
         
-        # **关键修复**: 将日期排序修改为升序 (date ASC)
         order_clause = "ORDER BY date ASC, "
         if sort_by == 'time':
-            # 如果按时间排序：日期 -> 时间 -> 紧急度
             order_clause += "time ASC, CASE urgency WHEN '高' THEN 1 WHEN '中' THEN 2 WHEN '低' THEN 3 ELSE 4 END"
-        else: # 默认为 urgency
-            # 如果按紧急度排序：日期 -> 紧急度 -> 时间
+        else:
             order_clause += "CASE urgency WHEN '高' THEN 1 WHEN '中' THEN 2 WHEN '低' THEN 3 ELSE 4 END, time ASC"
 
-        query = f"SELECT * FROM records WHERE category = ? AND status = ? AND user_id = ? {order_clause}"
-        cursor.execute(query, (category, status, user_id))
+        # **关键修改**: 移除 status 的过滤，只获取 category='general' 的记录
+        # 同时，只显示 status='pending' 的记录
+        query = f"SELECT * FROM records WHERE category = ? AND status = 'pending' AND user_id = ? {order_clause}"
+        cursor.execute(query, (category, user_id))
         general_records = [dict(row) for row in cursor.fetchall()]
         records = medicine_reminders + general_records
         
@@ -435,8 +481,10 @@ def delete_record(record_id):
         if record['category'] == 'shopping' and record['source_record_id']:
             cursor.execute("UPDATE records SET needs_purchase = 0 WHERE id = ? AND user_id = ?", (record['source_record_id'], user_id))
         if record['category'] == 'shopping':
+            # 当删除购物项时，同时删除关联的通用记录
             cursor.execute("DELETE FROM records WHERE category = 'general' AND shopping_source_id = ? AND user_id = ?", (record_id, user_id))
 
+        # 删除记录本身
         cursor.execute("DELETE FROM records WHERE id = ? AND user_id = ?", (record_id, user_id))
         conn.commit()
     except sqlite3.Error as e:
@@ -464,14 +512,27 @@ def update_record_status(record_id):
         if not record:
             return jsonify({"error": "记录不存在或权限不足"}), 404
 
-        if new_status == 'completed' and record['category'] == 'shopping' and record['source_record_id']:
-            source_id = record['source_record_id']
-            auto_refill_medicine(source_id) # This function needs to be adapted for user context
-            cursor.execute("UPDATE records SET needs_purchase = 0 WHERE id = ? AND user_id = ?", (source_id, user_id))
-            cursor.execute("DELETE FROM records WHERE id = ? AND user_id = ?", (record_id, user_id))
-            conn.commit()
-            return jsonify({"status": "success", "message": "Medicine refilled and shopping item removed."})
+        # --- 修改后的逻辑 ---
+        # 如果一个购物项的状态被更新（无论是 'completed' 还是 'pending'）
+        if record['category'] == 'shopping':
+            # 如果是标记为“完成”
+            if new_status == 'completed':
+                # 1. 如果这个购物项来自药品，自动补充库存
+                if record['source_record_id']:
+                    auto_refill_medicine(record['source_record_id'], user_id)
+                    cursor.execute("UPDATE records SET needs_purchase = 0 WHERE id = ? AND user_id = ?", (record['source_record_id'], user_id))
 
+                # 2. 删除由这个购物项生成的通用记录
+                cursor.execute("DELETE FROM records WHERE category = 'general' AND shopping_source_id = ? AND user_id = ?", (record_id, user_id))
+
+            # 3. 更新购物项本身的状态 (无论是 'completed' 还是 'pending')
+            cursor.execute("UPDATE records SET status = ? WHERE id = ? AND user_id = ?", (new_status, record_id, user_id))
+            
+            conn.commit()
+            return jsonify({"status": "success", "message": "Shopping item status updated."})
+        # --- 逻辑修改结束 ---
+
+        # 对于非购物项的普通状态更新（例如，将通用记录标记为完成）
         cursor.execute("UPDATE records SET status = ? WHERE id = ? AND user_id = ?", (new_status, record_id, user_id))
         conn.commit()
     except sqlite3.Error as e:
@@ -514,13 +575,13 @@ def shopping_to_general(shopping_id):
         conn.close()
     return jsonify({"status": "success", "message": "General record created."}), 201
 
-def auto_refill_medicine(record_id):
+def auto_refill_medicine(record_id, user_id):
     """内部函数，用于补充药品，需要被调用时提供用户上下文"""
     conn = _get_db_conn()
     cursor = conn.cursor()
     try:
         # 验证药品所有权
-        cursor.execute("SELECT total_quantity, refill_quantity FROM records WHERE id = ? AND user_id = ?", (record_id, current_user.id))
+        cursor.execute("SELECT total_quantity, refill_quantity FROM records WHERE id = ? AND user_id = ?", (record_id, user_id))
         record = cursor.fetchone()
         if not record or not record['refill_quantity']:
             raise ValueError("Refill quantity not set or permission denied")
