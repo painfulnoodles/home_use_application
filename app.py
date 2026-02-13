@@ -684,10 +684,8 @@ def delete_record(record_id):
             # 同时删除由它生成的、还存在于购物清单中的待购项
             cursor.execute("DELETE FROM records WHERE category = 'shopping' AND source_record_id = ? AND user_id = ?", (record_id, user_id))
 
-        # 如果删除的是购物项，同时删除关联的通用记录 (此逻辑保留)
-        if record['category'] == 'shopping':
-            cursor.execute("DELETE FROM records WHERE category = 'general' AND shopping_source_id = ? AND user_id = ?", (record_id, user_id))
-
+        # **关键修改**: 移除 shopping_source_id 相关逻辑
+        
         # 最后，删除记录本身
         cursor.execute("DELETE FROM records WHERE id = ? AND user_id = ?", (record_id, user_id))
         conn.commit()
@@ -760,9 +758,7 @@ def update_record_status(record_id):
         # 3. 更新购物项本身的状态
         cursor.execute("UPDATE records SET status = ? WHERE id = ?", (new_status, record_id))
 
-        # 4. 如果是标记为“已购买”，同时删除由它生成的通用记录
-        if new_status == 'completed':
-            cursor.execute("DELETE FROM records WHERE category = 'general' AND shopping_source_id = ? AND user_id = ?", (record_id, user_id))
+        # 4. **关键修改**: 移除 shopping_source_id 相关逻辑
 
         conn.commit()
     except (sqlite3.Error, ValueError) as e:
@@ -780,38 +776,7 @@ def _get_db_conn():
     conn.row_factory = sqlite3.Row
     return conn
 
-@app.route('/api/shopping/<int:shopping_id>/to_general', methods=['POST'])
-@login_required
-def shopping_to_general(shopping_id):
-    conn = None
-    try:
-        conn = _get_db_conn()
-        cursor = conn.cursor()
-        user_id = current_user.id
-        
-        cursor.execute("SELECT * FROM records WHERE id = ? AND category = 'shopping' AND user_id = ?", (shopping_id, user_id))
-        shopping_item = cursor.fetchone()
-        if not shopping_item:
-            return jsonify({"error": "购物项不存在或权限不足"}), 404
 
-        cursor.execute("SELECT id FROM records WHERE category = 'general' AND shopping_source_id = ? AND user_id = ?", (shopping_id, user_id))
-        if cursor.fetchone():
-            return jsonify({"error": "该购物项已存在于通用记录中"}), 409
-
-        general_content = f"购物: {shopping_item['content']}"
-        
-        # **关键修复**: 如果源购物项没有日期，则使用今天的日期
-        record_date = shopping_item['date'] if shopping_item['date'] else datetime.now().strftime('%Y-%m-%d')
-        
-        cursor.execute("INSERT INTO records (user_id, content, category, date, urgency, status, shopping_source_id) VALUES (?, ?, 'general', ?, '低', 'pending', ?)", (user_id, general_content, record_date, shopping_id))
-        conn.commit()
-    except sqlite3.Error as e:
-        if conn: conn.rollback()
-        return jsonify({"error": str(e)}), 500
-    finally:
-        if conn:
-            conn.close()
-    return jsonify({"status": "success", "message": "General record created."}), 201
 
 # **关键修改**: 再次审查并加固此函数
 @app.route('/api/records/<int:record_id>/refill', methods=['POST'])
@@ -944,10 +909,7 @@ def update_medicine_quantity(record_id):
         conn.commit()
     except sqlite3.Error as e:
         conn.rollback()
-        return jsonify({"error": str(e)}), 500
-    finally:
-        conn.close()
-    return jsonify({"status": "success"})
+        return jsonify({"status": "success"})
 
 @app.route('/api/shopping/clear', methods=['POST'])
 @login_required

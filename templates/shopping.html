@@ -144,7 +144,7 @@
         let buttonsHtml = '';
         if (isPending) {
             buttonsHtml = `
-                <button class="btn btn-sm btn-outline-info me-2" onclick="addShoppingItemToGeneral(${item.id})">添加到记录</button>
+                <!-- **关键修改**: 移除“添加到记录”按钮 -->
                 <button class="btn btn-sm btn-outline-primary me-2" onclick='openEditShoppingItemModal(${JSON.stringify(item)})'>编辑</button>
                 <button class="btn btn-sm btn-success me-2" onclick="markAsCompleted(${item.id})">已购买</button>
                 <a href="#" class="delete-btn" onclick="deleteShoppingItem(${item.id})">删除</a>
