@@ -511,13 +511,20 @@ def get_records():
 
             for med_row_obj in cursor.fetchall():
                 med_row = dict(med_row_obj)
-                if med_row['total_quantity'] is not None and med_row['reminder_threshold'] is not None and med_row['total_quantity'] < med_row['reminder_threshold']:
-                    
-                    # **关键修复**: 处理人物姓名可能为 None 的情况
-                    person_name = med_row['name'] or '未知人物'
-                    
-                    reminder_content = f"库存警告: {person_name}的'{med_row['content']}'数量不足 (剩余{med_row['total_quantity']}片, 阈值{med_row['reminder_threshold']}片)"
-                    medicine_reminders.append({"id": f"med_{med_row['id']}", "content": reminder_content, "category": "general", "date": today_str, "time": "08:00", "urgency": "高", "status": "pending", "is_medicine_reminder": True, "original_medicine_id": med_row['id']})
+                # **关键修复**: 在比较前，确保两个值都是整数
+                try:
+                    total_quantity = int(med_row['total_quantity'])
+                    reminder_threshold = int(med_row['reminder_threshold'])
+
+                    if total_quantity < reminder_threshold:
+                        # **关键修复**: 处理人物姓名可能为 None 的情况
+                        person_name = med_row['name'] or '未知人物'
+                        
+                        reminder_content = f"库存警告: {person_name}的'{med_row['content']}'数量不足 (剩余{total_quantity}片, 阈值{reminder_threshold}片)"
+                        medicine_reminders.append({"id": f"med_{med_row['id']}", "content": reminder_content, "category": "general", "date": today_str, "time": "08:00", "urgency": "高", "status": "pending", "is_medicine_reminder": True, "original_medicine_id": med_row['id']})
+                except (ValueError, TypeError, KeyError):
+                    # 如果转换失败或字段不存在，安全地跳过此条记录
+                    continue
 
             sort_by = request.args.get('sort_by', 'urgency')
             
@@ -684,17 +691,19 @@ def update_record_status(record_id):
 # --- 特定功能 API (已添加用户隔离) ---
 
 def _get_db_conn():
-    conn = sqlite3.connect('database.db')
+    conn = sqlite3.connect('database.db', timeout=15) # 确保这里有 timeout
     conn.row_factory = sqlite3.Row
     return conn
 
 @app.route('/api/shopping/<int:shopping_id>/to_general', methods=['POST'])
 @login_required
 def shopping_to_general(shopping_id):
-    conn = _get_db_conn()
-    cursor = conn.cursor()
-    user_id = current_user.id
+    conn = None
     try:
+        conn = _get_db_conn()
+        cursor = conn.cursor()
+        user_id = current_user.id
+        
         cursor.execute("SELECT * FROM records WHERE id = ? AND category = 'shopping' AND user_id = ?", (shopping_id, user_id))
         shopping_item = cursor.fetchone()
         if not shopping_item:
@@ -705,13 +714,18 @@ def shopping_to_general(shopping_id):
             return jsonify({"error": "该购物项已存在于通用记录中"}), 409
 
         general_content = f"购物: {shopping_item['content']}"
-        cursor.execute("INSERT INTO records (user_id, content, category, date, urgency, status, shopping_source_id) VALUES (?, ?, 'general', ?, '低', 'pending', ?)", (user_id, general_content, shopping_item['date'], shopping_id))
+        
+        # **关键修复**: 如果源购物项没有日期，则使用今天的日期
+        record_date = shopping_item['date'] if shopping_item['date'] else datetime.now().strftime('%Y-%m-%d')
+        
+        cursor.execute("INSERT INTO records (user_id, content, category, date, urgency, status, shopping_source_id) VALUES (?, ?, 'general', ?, '低', 'pending', ?)", (user_id, general_content, record_date, shopping_id))
         conn.commit()
     except sqlite3.Error as e:
-        conn.rollback()
+        if conn: conn.rollback()
         return jsonify({"error": str(e)}), 500
     finally:
-        conn.close()
+        if conn:
+            conn.close()
     return jsonify({"status": "success", "message": "General record created."}), 201
 
 def auto_refill_medicine(record_id, user_id):
