@@ -516,7 +516,18 @@ def get_records():
                         if total_quantity < reminder_threshold:
                             person_name = med_row['name'] or '未知人物'
                             reminder_content = f"库存警告: {person_name}的'{med_row['content']}'数量不足"
-                            reminders.append({"id": f"med_{med_row['id']}", "content": reminder_content, "category": "general", "date": today_str, "time": "08:00", "urgency": "高", "status": "pending", "is_dynamic_reminder": True})
+                            # **关键修复**: 添加 original_medicine_id 字段
+                            reminders.append({
+                                "id": f"med_{med_row['id']}", 
+                                "content": reminder_content, 
+                                "category": "general", 
+                                "date": today_str, 
+                                "time": "08:00", 
+                                "urgency": "高", 
+                                "status": "pending", 
+                                "is_dynamic_reminder": True,
+                                "original_medicine_id": med_row['id'] # <-- 新增的这行是关键
+                            })
                     except (ValueError, TypeError, KeyError):
                         continue
 
@@ -524,7 +535,20 @@ def get_records():
                 cursor.execute("SELECT DISTINCT date FROM records WHERE category = 'shopping' AND status = 'pending' AND date IS NOT NULL AND user_id = ?", (user_id,))
                 shopping_dates = [row['date'] for row in cursor.fetchall()]
                 for s_date in shopping_dates:
-                    reminders.append({"id": f"shop_{s_date}", "content": "有计划的购物任务", "category": "general", "date": s_date, "time": "09:00", "urgency": "中", "status": "pending", "is_dynamic_reminder": True})
+                    # **关键修复**: 使用一个不会与数据库ID冲突的、唯一的字符串ID
+                    # 并且明确标识这是一个购物提醒
+                    reminder_id = f"dynamic_shopping_{s_date}"
+                    reminders.append({
+                        "id": reminder_id, 
+                        "content": f"有计划的购物任务 ({s_date})", 
+                        "category": "general", 
+                        "date": s_date, 
+                        "time": "09:00", 
+                        "urgency": "中", 
+                        "status": "pending", 
+                        "is_dynamic_reminder": True,
+                        "is_shopping_reminder": True # **新增**: 添加一个明确的标识
+                    })
 
                 # 3. 获取普通的通用记录
                 sort_by = request.args.get('sort_by', 'urgency')
@@ -687,11 +711,21 @@ def update_record_status(record_id):
     cursor = conn.cursor()
     user_id = current_user.id
     try:
-        # 1. 获取购物项信息，特别是 source_record_id
+        # 1. 获取记录信息，并严格检查其类型
         cursor.execute("SELECT category, source_record_id FROM records WHERE id = ? AND user_id = ?", (record_id, user_id))
         record = cursor.fetchone()
-        if not record or record['category'] != 'shopping':
-            return jsonify({"error": "购物项不存在或权限不足"}), 404
+        if not record:
+            return jsonify({"error": "记录不存在或权限不足"}), 404
+
+        # **关键修复**: 如果是通用记录，只更新状态，然后立即返回
+        if record['category'] == 'general':
+            cursor.execute("UPDATE records SET status = ? WHERE id = ?", (new_status, record_id))
+            conn.commit()
+            return jsonify({"status": "success", "message": "通用记录状态已更新"})
+
+        # --- 从这里开始，代码只处理 shopping 类型的记录 ---
+        if record['category'] != 'shopping':
+            return jsonify({"error": "此接口只用于更新购物清单项的状态"}), 400
 
         source_medicine_id = record['source_record_id']
 
@@ -701,31 +735,27 @@ def update_record_status(record_id):
             cursor.execute("SELECT total_quantity, refill_quantity FROM records WHERE id = ? AND user_id = ?", (source_medicine_id, user_id))
             medicine = cursor.fetchone()
             if not medicine:
-                raise sqlite3.IntegrityError("源药品不存在，数据可能已损坏。")
-            
-            refill_amount = medicine['refill_quantity']
-            if not refill_amount or refill_amount <= 0:
-                raise ValueError("源药品的'每次补充数量'未设置或无效。")
+                # 如果源药品被删除了，安全地继续，只更新购物项状态
+                pass
+            else:
+                refill_amount = medicine['refill_quantity']
+                if not refill_amount or refill_amount <= 0:
+                    refill_amount = 0 # 即使未设置，也继续执行
 
-            current_total = medicine['total_quantity'] or 0
-            new_total = current_total
+                current_total = medicine['total_quantity'] or 0
+                new_total = current_total
 
-            # 根据新的状态，增加或扣除药品数量
-            if new_status == 'completed':
-                # 标记为“已购买” -> 增加库存
-                new_total += refill_amount
-                # 将药品的“需要购买”状态取消
-                cursor.execute("UPDATE records SET needs_purchase = 0 WHERE id = ?", (source_medicine_id,))
-            elif new_status == 'pending':
-                # 恢复为“待购买” -> 扣除库存
-                new_total -= refill_amount
-                if new_total < 0: new_total = 0 # 防止库存变为负数
-                # 将药品的“需要购买”状态重新激活
-                cursor.execute("UPDATE records SET needs_purchase = 1 WHERE id = ?", (source_medicine_id,))
-            
-            # 更新药品的新总数和消耗计算起始日期
-            new_start_date = datetime.now().strftime('%Y-%m-%d')
-            cursor.execute("UPDATE records SET total_quantity = ?, start_date = ? WHERE id = ?", (new_total, new_start_date, source_medicine_id))
+                # 根据新的状态，增加或扣除药品数量
+                if new_status == 'completed':
+                    new_total += refill_amount
+                    cursor.execute("UPDATE records SET needs_purchase = 0 WHERE id = ?", (source_medicine_id,))
+                elif new_status == 'pending':
+                    new_total -= refill_amount
+                    if new_total < 0: new_total = 0
+                    cursor.execute("UPDATE records SET needs_purchase = 1 WHERE id = ?", (source_medicine_id,))
+                
+                new_start_date = datetime.now().strftime('%Y-%m-%d')
+                cursor.execute("UPDATE records SET total_quantity = ?, start_date = ? WHERE id = ?", (new_total, new_start_date, source_medicine_id))
 
         # 3. 更新购物项本身的状态
         cursor.execute("UPDATE records SET status = ? WHERE id = ?", (new_status, record_id))
@@ -783,29 +813,45 @@ def shopping_to_general(shopping_id):
             conn.close()
     return jsonify({"status": "success", "message": "General record created."}), 201
 
-# **新增**: 创建一个专门用于自动补充的 API 端点
+# **关键修改**: 再次审查并加固此函数
 @app.route('/api/records/<int:record_id>/refill', methods=['POST'])
 @login_required
 def refill_medicine_from_purchase(record_id):
+    conn = _get_db_conn()
+    cursor = conn.cursor()
+    user_id = current_user.id
     try:
-        # 直接调用内部函数，它包含了所有权验证和更新逻辑
-        auto_refill_medicine(record_id, current_user.id)
+        # 1. 验证药品所有权
+        cursor.execute("SELECT total_quantity, refill_quantity FROM records WHERE id = ? AND user_id = ? AND category = 'medicine'", (record_id, user_id))
+        record = cursor.fetchone()
+        if not record:
+            return jsonify({"error": "药品不存在或权限不足"}), 404
         
-        # 同时，将药品的 needs_purchase 状态重置为 0
-        conn = _get_db_conn()
-        cursor = conn.cursor()
-        try:
-            cursor.execute("UPDATE records SET needs_purchase = 0 WHERE id = ? AND user_id = ?", (record_id, current_user.id))
-            conn.commit()
-        finally:
-            conn.close()
+        # 2. 计算补充数量，即使未设置也继续执行
+        refill_amount = record['refill_quantity']
+        if not refill_amount or refill_amount <= 0:
+            refill_amount = 0 # 如果未设置，则不增加库存，但后续操作继续
 
-    except ValueError as e:
-        return jsonify({"error": str(e)}), 400
+        # 3. 增加库存
+        new_total = (record['total_quantity'] or 0) + refill_amount
+        new_start_date = datetime.now().strftime('%Y-%m-%d')
+        cursor.execute("UPDATE records SET total_quantity = ?, start_date = ? WHERE id = ?", (new_total, new_start_date, record_id))
+
+        # 4. 将药品的“需要购买”状态取消
+        cursor.execute("UPDATE records SET needs_purchase = 0 WHERE id = ?", (record_id,))
+
+        # 5. **联动核心**: 在购物清单中查找对应的项，并将其状态更新为 'completed'
+        # 无论是否找到，这个操作都是安全的
+        cursor.execute("UPDATE records SET status = 'completed' WHERE category = 'shopping' AND source_record_id = ? AND user_id = ?", (record_id, user_id))
+
+        conn.commit()
     except sqlite3.Error as e:
+        conn.rollback()
+        print(f"Error in refill_medicine_from_purchase: {e}") # 增加日志打印
         return jsonify({"error": str(e)}), 500
-    
-    return jsonify({"status": "success", "message": "药品已补充"})
+    finally:
+        conn.close()
+    return jsonify({"status": "success", "message": "药品已补充，购物清单已更新"})
 
 
 def auto_refill_medicine(record_id, user_id):

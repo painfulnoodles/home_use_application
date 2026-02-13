@@ -144,7 +144,13 @@
 <!-- 显示列表 -->
 <div class="row mt-4">
     <div class="col-12">
-        <!-- **移除**: "需要购买的药品"卡片 -->
+        <!-- **恢复**: "需要购买的药品"卡片 -->
+        <div id="needs-purchase-card" class="card border-warning mb-4 d-none">
+            <div class="card-header bg-warning">急需购买的药品</div>
+            <ul id="needs-purchase-list" class="list-group list-group-flush">
+                <!-- 需要购买的药品将在这里动态生成 -->
+            </ul>
+        </div>
         <div id="medicine-display-area">
             <!-- 按人物分类的药品列表将在这里动态生成 -->
         </div>
@@ -329,6 +335,12 @@
         const displayArea = document.getElementById('medicine-display-area');
         displayArea.innerHTML = '';
 
+        // **恢复**: 获取需要购买的列表和卡片元素
+        const needsPurchaseList = document.getElementById('needs-purchase-list');
+        const needsPurchaseCard = document.getElementById('needs-purchase-card');
+        needsPurchaseList.innerHTML = '';
+        let needsPurchaseCount = 0;
+
         if (peopleWithMedicines.length === 0) {
             displayArea.innerHTML = '<p class="text-muted">还没有任何药品记录。</p>';
         }
@@ -351,14 +363,13 @@
                     detailsText = `每次 ${item.dosage} 片`;
                 }
 
-
-                // 修改：直接显示当前库存，而不是计算剩余量
                 if (typeof item.total_quantity === 'number') {
                     detailsText += ` · 当前库存 ${item.total_quantity} 片`;
                 }
 
+                // **恢复**: “加入购买清单”按钮的逻辑
                 const purchaseBtnClass = item.needs_purchase ? 'btn-warning' : 'btn-outline-secondary';
-                const purchaseBtnText = item.needs_purchase ? '已加入清单' : '加入购买清单';
+                const purchaseBtnText = item.needs_purchase ? '已在清单' : '加入清单';
 
                 itemsHtml += `
                     <li class="list-group-item d-flex justify-content-between align-items-center">
@@ -368,15 +379,29 @@
                             <small class="text-muted d-block">${detailsText}</small>
                         </div>
                         <div>
-                            <button class="btn btn-sm btn-outline-success me-2" onclick='openRefillModal(${JSON.stringify(item)})'>更新药品数量</button>
+                            <button class="btn btn-sm btn-outline-success me-2" onclick='openRefillModal(${JSON.stringify(item)})'>更新数量</button>
                             <button class="btn btn-sm btn-outline-primary me-2" onclick='openEditMedicineModal(${JSON.stringify(item)}, ${person.person_id})'>编辑</button>
-                            <!-- **关键修改**: 移除“加入购买清单”按钮 -->
+                            <!-- **恢复**: “加入购买清单”按钮 -->
+                            <button class="btn btn-sm ${purchaseBtnClass} me-2" onclick="toggleNeedsPurchase(${item.id}, ${!item.needs_purchase})">${purchaseBtnText}</button>
                             <a href="#" class="delete-btn" onclick="deleteMedicine(${item.id})">删除</a>
                         </div>
                     </li>
                 `;
 
-                // **移除**: 不再需要处理 needs_purchase 的逻辑
+                // **恢复**: 如果药品库存低于阈值，则在“需要购买”列表中也显示一份
+                if (item.total_quantity !== null && item.reminder_threshold !== null && item.total_quantity < item.reminder_threshold) {
+                    needsPurchaseCount++;
+                    const purchaseLi = document.createElement('li');
+                    purchaseLi.className = 'list-group-item d-flex justify-content-between align-items-center';
+                    purchaseLi.innerHTML = `
+                        <div>
+                            <strong>${person.person_name} - ${item.content}</strong>
+                            <small class="text-muted d-block">当前库存: ${item.total_quantity}, 阈值: ${item.reminder_threshold}</small>
+                        </div>
+                        <button class="btn btn-sm ${purchaseBtnClass}" onclick="toggleNeedsPurchase(${item.id}, ${!item.needs_purchase})">${purchaseBtnText}</button>
+                    `;
+                    needsPurchaseList.appendChild(purchaseLi);
+                }
             });
             itemsHtml += '</ul>';
 
@@ -387,7 +412,12 @@
             displayArea.appendChild(personCard);
         });
 
-        // **移除**: 不再需要检查 needsPurchaseCount
+        // **恢复**: 根据是否有需要购买的药品，显示或隐藏卡片
+        if (needsPurchaseCount > 0) {
+            needsPurchaseCard.classList.remove('d-none');
+        } else {
+            needsPurchaseCard.classList.add('d-none');
+        }
     }
 
     // 删除药品
@@ -397,7 +427,15 @@
         await fetchAndDisplayMedicines();
     }
 
-    // **关键修改**: 删除 toggleNeedsPurchase 函数
+    // **恢复**: toggleNeedsPurchase 函数
+    async function toggleNeedsPurchase(recordId, needsPurchase) {
+        await fetch(`/api/records/${recordId}/purchase`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ needs_purchase: needsPurchase })
+        });
+        await fetchAndDisplayMedicines();
+    }
     
     // **修改**: 页面加载时初始化
     document.addEventListener('DOMContentLoaded', async () => {
