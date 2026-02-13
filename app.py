@@ -427,7 +427,45 @@ def get_records():
     user_id = current_user.id
     records = []
 
-    if category in ['clothes', 'medicine']:
+    if category == 'medicine':
+        # --- 新增：自动计算和更新药品数量的逻辑 ---
+        try:
+            cursor.execute("SELECT * FROM records WHERE category = 'medicine' AND user_id = ?", (user_id,))
+            medicines_to_update = cursor.fetchall()
+            today = datetime.now().date()
+
+            for med in medicines_to_update:
+                # 确保所有必需字段都存在且有效
+                if med['start_date'] and med['total_quantity'] is not None and med['frequency'] and med['dosage']:
+                    try:
+                        start_date = datetime.strptime(med['start_date'], '%Y-%m-%d').date()
+                        
+                        # 只有当上次更新日期是今天之前才进行计算
+                        if start_date < today:
+                            days_passed = (today - start_date).days
+                            daily_consumption = int(med['frequency']) * int(med['dosage'])
+                            total_consumption = days_passed * daily_consumption
+                            
+                            new_quantity = med['total_quantity'] - total_consumption
+                            # 确保数量不会变成负数
+                            if new_quantity < 0:
+                                new_quantity = 0
+                            
+                            # 更新数据库
+                            cursor.execute(
+                                "UPDATE records SET total_quantity = ?, start_date = ? WHERE id = ?",
+                                (new_quantity, today.strftime('%Y-%m-%d'), med['id'])
+                            )
+                    except (ValueError, TypeError):
+                        # 如果频率或用量不是有效的数字，或者日期格式错误，则跳过
+                        continue
+            conn.commit() # 提交所有更新
+        except sqlite3.Error as e:
+            print(f"Error updating medicine quantities: {e}")
+            conn.rollback()
+        # --- 自动更新逻辑结束 ---
+
+        # 继续执行原有的查询逻辑，以获取刚刚更新完的数据
         query = "SELECT p.id as person_id, p.name as person_name, r.* FROM records r JOIN people p ON r.person_id = p.id WHERE r.category = ? AND r.user_id = ? ORDER BY p.name, r.id"
         cursor.execute(query, (category, user_id))
         items_by_person = {}
@@ -438,12 +476,19 @@ def get_records():
                 items_by_person[person_id] = {"person_id": person_id, "person_name": row['person_name'], "items": []}
             items_by_person[person_id]['items'].append(row)
         records = list(items_by_person.values())
-    elif category == 'shopping':
-        # **新增**: 为购物清单单独处理
-        status = request.args.get('status', 'pending')
-        query = "SELECT * FROM records WHERE category = ? AND status = ? AND user_id = ? ORDER BY id DESC"
-        cursor.execute(query, (category, status, user_id))
-        records = [dict(row) for row in cursor.fetchall()]
+
+    elif category in ['clothes']: # **修改**: 将 clothes 也移到这里
+        query = "SELECT p.id as person_id, p.name as person_name, r.* FROM records r JOIN people p ON r.person_id = p.id WHERE r.category = ? AND r.user_id = ? ORDER BY p.name, r.id"
+        cursor.execute(query, (category, user_id))
+        items_by_person = {}
+        for row_obj in cursor.fetchall():
+            row = dict(row_obj)
+            person_id = row['person_id']
+            if person_id not in items_by_person:
+                items_by_person[person_id] = {"person_id": person_id, "person_name": row['person_name'], "items": []}
+            items_by_person[person_id]['items'].append(row)
+        records = list(items_by_person.values())
+        
     else: # category == 'general'
         medicine_reminders = []
         # 只有在获取 'pending' 状态的通用记录时才检查药品库存
