@@ -1,0 +1,11 @@
+database.db
+__pycache__/
+*.pyc
+
+
+# 上传的文件目录
+uploads/
+
+# 虚拟环境目录 (如果存在)
+venv/
+.venv/
