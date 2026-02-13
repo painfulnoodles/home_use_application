@@ -35,14 +35,55 @@ def init_db():
         )
     ''')
 
-    # --- 检查并更新 people 表，添加 user_id ---
-    people_cols = [col[1] for col in cursor.execute("PRAGMA table_info(people)").fetchall()]
-    if 'user_id' not in people_cols:
-        cursor.execute('ALTER TABLE people ADD COLUMN user_id INTEGER')
+    # --- 修复 people 表结构 ---
+    # 1. 检查旧的 people 表是否存在
+    cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='people';")
+    people_table_exists = cursor.fetchone()
+
+    if people_table_exists:
+        # 2. 检查旧表是否包含 user_id 列
+        people_cols = [col[1] for col in cursor.execute("PRAGMA table_info(people)").fetchall()]
+        if 'user_id' not in people_cols:
+            # 如果是旧结构（没有 user_id），则删除重建
+            print("Recreating 'people' table with new schema...")
+            cursor.execute('DROP TABLE people')
+            cursor.execute('''
+                CREATE TABLE people (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id INTEGER,
+                    name TEXT NOT NULL,
+                    UNIQUE(user_id, name)
+                )
+            ''')
+        else:
+            # 如果有 user_id 但约束可能不对，也重建它以确保正确性
+            # 注意：这将清除现有的人物数据。请在生产环境中谨慎操作。
+            print("Recreating 'people' table to ensure correct constraints...")
+            cursor.execute('DROP TABLE people')
+            cursor.execute('''
+                CREATE TABLE people (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id INTEGER,
+                    name TEXT NOT NULL,
+                    UNIQUE(user_id, name)
+                )
+            ''')
+    else:
+        # 如果表不存在，直接创建
+        cursor.execute('''
+            CREATE TABLE people (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER,
+                name TEXT NOT NULL,
+                UNIQUE(user_id, name)
+            )
+        ''')
+
 
     # --- 检查并更新 records 表，添加 user_id ---
     records_cols = [col[1] for col in cursor.execute("PRAGMA table_info(records)").fetchall()]
     if 'user_id' not in records_cols:
+        # 这是一个简化的迁移，对于已有数据的旧表，可能需要更复杂的数据迁移策略
         cursor.execute('ALTER TABLE records ADD COLUMN user_id INTEGER')
 
     # --- 确保所有字段都存在 (用于旧数据库的迁移) ---
@@ -244,12 +285,20 @@ def add_person():
     
     conn = sqlite3.connect('database.db')
     cursor = conn.cursor()
+    user_id = current_user.id
     try:
-        cursor.execute("INSERT INTO people (name, user_id) VALUES (?, ?)", (name, current_user.id))
+        # 修复：在插入前，先检查该用户是否已有同名人物
+        cursor.execute("SELECT id FROM people WHERE name = ? AND user_id = ?", (name, user_id))
+        if cursor.fetchone():
+            return jsonify({"error": f"名称为 '{name}' 的人物已存在于您的账号中"}), 409
+
+        # 如果不存在，则插入
+        cursor.execute("INSERT INTO people (name, user_id) VALUES (?, ?)", (name, user_id))
         conn.commit()
-    except sqlite3.IntegrityError:
-        # **关键修复**: 明确指出错误是在当前用户下发生的
-        return jsonify({"error": f"名称为 '{name}' 的人物已存在于您的账号中"}), 409
+    except sqlite3.Error as e:
+        conn.rollback()
+        # 捕获其他可能的数据库错误
+        return jsonify({"error": str(e)}), 500
     finally:
         conn.close()
     return jsonify({"status": "success"}), 201
