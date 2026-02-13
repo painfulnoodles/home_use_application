@@ -498,6 +498,30 @@ def get_records():
         else: # category == 'general' or 'shopping'
             # **关键修复**: 只有在 category 是 'general' 时才执行提醒逻辑
             if category == 'general':
+                # --- 步骤 1: 执行药品自动消耗计算 (从 medicine 分支复制过来) ---
+                cursor.execute("SELECT * FROM records WHERE category = 'medicine' AND user_id = ?", (user_id,))
+                medicines_to_update = cursor.fetchall()
+                today = datetime.now().date()
+                updates_to_perform = []
+
+                for med in medicines_to_update:
+                    if med['start_date'] and med['total_quantity'] is not None and med['frequency'] and med['dosage']:
+                        try:
+                            start_date = datetime.strptime(med['start_date'], '%Y-%m-%d').date()
+                            if start_date < today:
+                                days_passed = (today - start_date).days
+                                total_consumption = days_passed * int(med['frequency']) * int(med['dosage'])
+                                new_quantity = med['total_quantity'] - total_consumption
+                                if new_quantity < 0: new_quantity = 0
+                                updates_to_perform.append((new_quantity, today.strftime('%Y-%m-%d'), med['id']))
+                        except (ValueError, TypeError):
+                            continue
+                
+                if updates_to_perform:
+                    cursor.executemany("UPDATE records SET total_quantity = ?, start_date = ? WHERE id = ?", updates_to_perform)
+                    conn.commit()
+                
+                # --- 步骤 2: 在更新后的数据基础上生成提醒 ---
                 reminders = []
                 today_str = datetime.now().strftime('%Y-%m-%d')
                 
