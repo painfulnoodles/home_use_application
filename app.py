@@ -203,6 +203,62 @@ def upload_avatar():
     return jsonify({"error": "文件上传失败"}), 500
 
 
+# --- 新增：注销账户 API ---
+@app.route('/api/user/delete', methods=['DELETE'])
+@login_required
+def delete_account():
+    user_id = current_user.id
+    conn = _get_db_conn()
+    cursor = conn.cursor()
+    try:
+        # 1. 查找该用户上传的所有文件以便后续删除
+        photo_paths_to_delete = []
+        # 查找头像
+        cursor.execute("SELECT avatar FROM users WHERE id = ?", (user_id,))
+        avatar_row = cursor.fetchone()
+        if avatar_row and avatar_row['avatar']:
+            photo_paths_to_delete.append(avatar_row['avatar'])
+        
+        # 查找记录中的照片
+        cursor.execute("SELECT completion_photos FROM records WHERE user_id = ? AND completion_photos IS NOT NULL", (user_id,))
+        import json
+        for row in cursor.fetchall():
+            try:
+                paths = json.loads(row['completion_photos'])
+                if isinstance(paths, list):
+                    photo_paths_to_delete.extend(paths)
+            except json.JSONDecodeError:
+                continue
+
+        # 2. 从数据库中删除所有与用户相关的数据
+        # 由于外键约束，删除顺序很重要：先删子表，再删主表
+        cursor.execute("DELETE FROM records WHERE user_id = ?", (user_id,))
+        cursor.execute("DELETE FROM people WHERE user_id = ?", (user_id,))
+        cursor.execute("DELETE FROM users WHERE id = ?", (user_id,))
+        
+        conn.commit()
+
+        # 3. 从文件系统中删除用户上传的文件
+        for path in photo_paths_to_delete:
+            if os.path.exists(path):
+                try:
+                    os.remove(path)
+                except OSError as e:
+                    # 记录错误，但继续执行，以防文件被占用等问题
+                    print(f"Error deleting file {path}: {e}")
+        
+        # 4. 登出用户
+        logout_user()
+
+    except sqlite3.Error as e:
+        conn.rollback()
+        return jsonify({"error": str(e)}), 500
+    finally:
+        conn.close()
+        
+    return jsonify({"status": "success", "message": "账户已成功注销"})
+
+
 # **新增**: 获取已完成的记录
 @app.route('/api/records/completed', methods=['GET'])
 @login_required

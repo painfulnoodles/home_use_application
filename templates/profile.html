@@ -54,6 +54,17 @@
         </div>
     </div>
 </div>
+
+<!-- 新增：危险操作区域 -->
+<div class="card mt-5 border-danger">
+    <div class="card-header bg-danger text-white">
+        危险操作
+    </div>
+    <div class="card-body">
+        <p class="card-text">注销账户将永久删除您的所有数据，包括个人信息、所有记录和上传的照片。此操作不可恢复。</p>
+        <button class="btn btn-danger" onclick="deleteAccount()">注销我的账户</button>
+    </div>
+</div>
 {% endblock %}
 
 {% block body_script %}
@@ -90,6 +101,38 @@
         } else {
             const error = await response.json();
             alert(`上传失败: ${error.error}`);
+        }
+    }
+
+    // 新增：注销账户的函数
+    async function deleteAccount() {
+        const confirmation = prompt('为确认此操作，请输入您的用户名：');
+        if (confirmation === null) {
+            return; // 用户取消了操作
+        }
+
+        // 从页面获取当前用户名进行比对
+        const currentUsername = document.getElementById('profile-username').textContent;
+        if (confirmation !== currentUsername) {
+            alert('用户名不匹配，操作已取消。');
+            return;
+        }
+
+        if (!confirm('最后警告：您确定要永久删除您的账户和所有数据吗？')) {
+            return;
+        }
+
+        const response = await fetch('/api/user/delete', {
+            method: 'DELETE'
+        });
+
+        if (response.ok) {
+            alert('您的账户已成功注销。再见！');
+            // 注销成功后，后端会自动登出，前端跳转到登录页
+            window.location.href = '/login';
+        } else {
+            const error = await response.json();
+            alert(`注销失败: ${error.error}`);
         }
     }
 
