@@ -49,10 +49,17 @@
     <div class="card-body">
         <div class="d-flex justify-content-between align-items-center">
             <h2 class="card-title mb-0">通用记录</h2>
-            <!-- 触发模态框的按钮 -->
-            <button type="button" class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#addGeneralRecordModal">
-                添加记录
-            </button>
+            <div>
+                <!-- **恢复**: 排序切换开关 -->
+                <div class="form-check form-switch d-inline-block me-3" title="切换排序方式">
+                    <input class="form-check-input" type="checkbox" role="switch" id="sort-toggle-switch">
+                    <label class="form-check-label" for="sort-toggle-switch" id="sort-label">按紧急度</label>
+                </div>
+                <!-- 触发模态框的按钮 -->
+                <button type="button" class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#addGeneralRecordModal">
+                    添加记录
+                </button>
+            </div>
         </div>
         <hr>
         <ul id="record-list" class="list-group">
@@ -104,9 +111,13 @@
 
 {% block body_script %}
 <script>
+    // **恢复**: 全局变量用于存储当前排序方式
+    let currentSortBy = 'urgency';
+
     // 渲染通用记录，按天分组
     async function fetchAndRenderGeneralRecords() {
-        const response = await fetch(`/api/records?category=general`);
+        // **恢复**: 在请求中加入排序参数
+        const response = await fetch(`/api/records?category=general&sort_by=${currentSortBy}`);
         const records = await response.json();
         const list = document.getElementById('record-list');
         list.innerHTML = '';
@@ -126,12 +137,22 @@
             return acc;
         }, {});
 
-        // 按日期键（从旧到新，升序）排序并渲染
-        Object.keys(recordsByDate).sort().forEach(date => {
+        // **关键修复**: 修改日期排序逻辑为升序
+        const sortedDates = Object.keys(recordsByDate).sort((a, b) => {
+            if (a === '无日期') return -1; // "无日期"始终在最前
+            if (b === '无日期') return 1;
+            return new Date(a) - new Date(b); // 按日期升序排列
+        });
+
+        // 按排序后的日期键进行渲染
+        sortedDates.forEach(date => {
             // 添加日期标题
             const dateHeader = document.createElement('li');
-            dateHeader.className = 'list-group-item list-group-item-secondary fw-bold';
-            dateHeader.textContent = date;
+            dateHeader.className = 'list-group-item list-group-item-secondary fw-bold d-flex justify-content-between align-items-center';
+            
+            // **新增**: 为日期标题添加批量删除按钮
+            const deleteButtonHtml = date !== '无日期' ? `<button class="btn btn-sm btn-outline-danger" onclick="batchDeleteByDate('${date}')">删除当天</button>` : '';
+            dateHeader.innerHTML = `<span>${date}</span> ${deleteButtonHtml}`;
             list.appendChild(dateHeader);
 
             // 渲染该日期的记录
@@ -141,6 +162,24 @@
                 
                 const urgencyBadge = record.urgency ? `<span class="badge bg-${record.urgency === '高' ? 'danger' : (record.urgency === '中' ? 'warning' : 'secondary')} me-2">${record.urgency}</span>` : '';
 
+                // 根据是否为药品提醒来生成不同的按钮
+                let buttonsHtml = '';
+                if (record.is_medicine_reminder) {
+                    // **关键修复**: 药品提醒是动态生成的，不应提供编辑功能。
+                    // 提供“已购买”（补充库存）和“忽略”（临时移除）操作。
+                    buttonsHtml = `
+                        <button class="btn btn-sm btn-success me-2" onclick="markAsPurchased(${record.original_medicine_id})">已购买</button>
+                        <a href="#" class="delete-btn" onclick="this.closest('li').remove()">忽略</a>
+                    `;
+                } else {
+                    // 普通提醒：可编辑 + 普通的“完成”按钮 + 删除
+                    buttonsHtml = `
+                        <a href="#" class="btn btn-sm btn-outline-primary me-2" onclick='openEditModal(${JSON.stringify(record)})'>编辑</a>
+                        <button class="btn btn-sm btn-outline-success me-2" onclick="markAsCompleted(${record.id})">完成</button>
+                        <a href="#" class="delete-btn" onclick="deleteRecord(${record.id}, 'general')">删除</a>
+                    `;
+                }
+
                 li.innerHTML = `
                     <div>
                         ${urgencyBadge}
@@ -148,8 +187,7 @@
                         <div class="record-meta">${record.time || ''}</div>
                     </div>
                     <div>
-                        <a href="#" class="btn btn-sm btn-outline-primary me-2" onclick='openEditModal(${JSON.stringify(record)})'>编辑</a>
-                        <a href="#" class="delete-btn" onclick="deleteRecord(${record.id}, 'general')">删除</a>
+                        ${buttonsHtml}
                     </div>
                 `;
                 list.appendChild(li);
@@ -215,6 +253,63 @@
         fetchAndRenderGeneralRecords();
     }
 
+    // **新增**: 批量删除当天的所有记录
+    async function batchDeleteByDate(date) {
+        if (!confirm(`确定要删除日期为 ${date} 的所有通用记录吗？`)) return;
+
+        // 获取当天所有记录的ID
+        const response = await fetch(`/api/records?category=general&status=pending`);
+        const allRecords = await response.json();
+        const idsToDelete = allRecords
+            .filter(record => record.date === date && !record.is_medicine_reminder) // 过滤出当天的、非药品提醒的记录
+            .map(record => record.id);
+
+        if (idsToDelete.length === 0) {
+            alert('没有可删除的记录。');
+            return;
+        }
+
+        // 循环调用删除API
+        for (const id of idsToDelete) {
+            // 我们不等待每个删除完成，以加快速度，但也可以用 Promise.all
+            fetch(`/api/records/${id}`, { method: 'DELETE' });
+        }
+
+        // 延迟一小段时间后刷新，以确保服务器有时间处理删除
+        setTimeout(() => {
+            fetchAndRenderGeneralRecords();
+        }, 500);
+    }
+
+    // 新增：将普通记录标记为完成（移动到已完成状态，但不会显示）
+    async function markAsCompleted(recordId) {
+        await fetch(`/api/records/${recordId}/status`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ status: 'completed' })
+        });
+        fetchAndRenderGeneralRecords();
+    }
+
+    // 新增：标记药品为已购买并自动补充
+    async function markAsPurchased(recordId) {
+        if (!confirm('确认已购买此药品吗？系统将自动为您补充库存。')) return;
+
+        const response = await fetch(`/api/records/${recordId}/purchase`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ needs_purchase: false }) // This will trigger refill logic via status update
+        });
+
+        if (response.ok) {
+            alert('药品库存已更新！');
+            fetchAndRenderGeneralRecords();
+        } else {
+            const error = await response.json();
+            alert(`操作失败: ${error.error}`);
+        }
+    }
+
     // 新增：更新记录
     async function updateRecord(id, category) {
         const payload = {
@@ -241,18 +336,56 @@
     
     // 重写 deleteRecord 以便刷新
     async function deleteRecord(id, category) {
+        if (typeof id === 'string' && id.startsWith('med_')) {
+            console.log("Ignoring delete request for a medicine reminder.");
+            return;
+        }
         if (!confirm('确定要删除这条记录吗？')) return;
         await fetch(`/api/records/${id}`, { method: 'DELETE' });
         fetchAndRenderGeneralRecords();
     }
 
-    window.onload = () => {
+    // 修改: 使用 DOMContentLoaded 替代 window.onload
+    document.addEventListener('DOMContentLoaded', () => {
+        // 确保在 base.html 的认证检查之后执行
+        if (['/login', '/register'].includes(window.location.pathname)) return;
+
+        // **恢复**: 从 localStorage 加载排序设置
+        const savedSortBy = localStorage.getItem('recordSortBy');
+        if (savedSortBy) {
+            currentSortBy = savedSortBy;
+        }
+
         fetchAndRenderGeneralRecords();
         const now = new Date();
         const date = now.toISOString().split('T')[0];
         const time = now.toTimeString().split(' ')[0].substring(0, 5);
         document.getElementById('record-date').value = date;
         document.getElementById('record-time').value = time;
-    };
+
+        // **恢复**: 为排序开关添加事件监听并初始化
+        const sortSwitch = document.getElementById('sort-toggle-switch');
+        const sortLabel = document.getElementById('sort-label');
+
+        if (currentSortBy === 'time') {
+            sortSwitch.checked = true;
+            sortLabel.textContent = '按时间';
+        } else {
+            sortSwitch.checked = false;
+            sortLabel.textContent = '按紧急度';
+        }
+
+        sortSwitch.addEventListener('change', () => {
+            if (sortSwitch.checked) {
+                currentSortBy = 'time';
+                sortLabel.textContent = '按时间';
+            } else {
+                currentSortBy = 'urgency';
+                sortLabel.textContent = '按紧急度';
+            }
+            localStorage.setItem('recordSortBy', currentSortBy);
+            fetchAndRenderGeneralRecords();
+        });
+    });
 </script>
 {% endblock %}

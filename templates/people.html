@@ -194,7 +194,10 @@
         }
     }
 
-    // 页面加载时初始化
-    window.onload = populatePeopleLists;
+    // **修改**: 页面加载时初始化
+    document.addEventListener('DOMContentLoaded', async () => {
+        if (['/login', '/register'].includes(window.location.pathname)) return;
+        await populatePeopleLists();
+    });
 </script>
 {% endblock %}

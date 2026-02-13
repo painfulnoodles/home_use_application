@@ -1,0 +1,163 @@
+{% extends "base.html" %}
+
+{% block title %}个人中心{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+    <a href="/" class="btn btn-sm btn-outline-secondary">&lt; 返回主页</a>
+    <h1 class="mb-0">个人中心 - 已完成的记录</h1>
+    <div></div>
+</div>
+
+<div id="completed-records-list" class="list-group">
+    <!-- 已完成的记录将在这里动态生成 -->
+</div>
+
+<!-- 添加/编辑感想和照片的模态框 -->
+<div class="modal fade" id="detailsModal" tabindex="-1" aria-labelledby="detailsModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="detailsModalLabel">添加感想与照片</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <input type="hidden" id="details-record-id">
+                <div class="mb-3">
+                    <label for="completion-notes" class="form-label">感想</label>
+                    <textarea id="completion-notes" class="form-control" rows="4" placeholder="记录下此刻的想法..."></textarea>
+                </div>
+                <div class="mb-3">
+                    <label for="completion-photos" class="form-label">添加照片</label>
+                    <input type="file" id="completion-photos" class="form-control" multiple>
+                </div>
+                <div id="existing-photos-container">
+                    <h6>已上传的照片:</h6>
+                    <div id="existing-photos" class="d-flex flex-wrap gap-2"></div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">关闭</button>
+                <button type="button" class="btn btn-primary" onclick="saveDetails()">保存</button>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block body_script %}
+<script>
+    async function fetchAndRenderCompletedRecords() {
+        const response = await fetch('/api/records/completed');
+        const records = await response.json();
+        const listContainer = document.getElementById('completed-records-list');
+        listContainer.innerHTML = '';
+
+        if (records.length === 0) {
+            listContainer.innerHTML = '<p class="text-muted text-center mt-4">还没有已完成的记录。</p>';
+            return;
+        }
+
+        // **新增**: 按日期对记录进行分组
+        const recordsByDate = records.reduce((acc, record) => {
+            const date = record.date || '无日期';
+            if (!acc[date]) {
+                acc[date] = [];
+            }
+            acc[date].push(record);
+            return acc;
+        }, {});
+
+        // 后端已按日期降序排序，所以直接获取 keys 即可
+        const sortedDates = Object.keys(recordsByDate);
+
+        // **修改**: 按天渲染记录
+        sortedDates.forEach(date => {
+            // 添加日期标题
+            const dateHeader = document.createElement('div');
+            dateHeader.className = 'list-group-item list-group-item-secondary fw-bold';
+            dateHeader.textContent = date;
+            listContainer.appendChild(dateHeader);
+
+            // 渲染该日期的记录
+            recordsByDate[date].forEach(record => {
+                const photos = record.completion_photos ? JSON.parse(record.completion_photos) : [];
+                let photosHtml = '';
+                if (photos.length > 0) {
+                    photosHtml = `<div class="mt-2 d-flex flex-wrap gap-2">` +
+                        photos.map(p => `<img src="/${p}" class="img-thumbnail" width="80" height="80" alt="photo">`).join('') +
+                        `</div>`;
+                }
+
+                const item = document.createElement('div');
+                item.className = 'list-group-item list-group-item-action flex-column align-items-start';
+                item.innerHTML = `
+                    <div class="d-flex w-100 justify-content-between">
+                        <h5 class="mb-1">${record.content}</h5>
+                        <div>
+                            <button class="btn btn-sm btn-outline-primary me-2" onclick='openDetailsModal(${JSON.stringify(record)})'>编辑感想/照片</button>
+                            <!-- **新增**: 删除按钮 -->
+                            <a href="#" class="delete-btn" onclick="deleteCompletedRecord(${record.id})">删除</a>
+                        </div>
+                    </div>
+                    <p class="mb-1">${record.completion_notes || '暂无感想'}</p>
+                    ${photosHtml}
+                </div>`;
+                listContainer.appendChild(item);
+            });
+        });
+    }
+
+    function openDetailsModal(record) {
+        const modal = new bootstrap.Modal(document.getElementById('detailsModal'));
+        document.getElementById('details-record-id').value = record.id;
+        document.getElementById('completion-notes').value = record.completion_notes || '';
+        document.getElementById('completion-photos').value = ''; // 清空文件输入
+
+        const photosContainer = document.getElementById('existing-photos');
+        photosContainer.innerHTML = '';
+        const photos = record.completion_photos ? JSON.parse(record.completion_photos) : [];
+        if (photos.length > 0) {
+            photos.forEach(p => {
+                photosContainer.innerHTML += `<img src="/${p}" class="img-thumbnail" width="60" height="60" alt="photo">`;
+            });
+            document.getElementById('existing-photos-container').classList.remove('d-none');
+        } else {
+            document.getElementById('existing-photos-container').classList.add('d-none');
+        }
+
+        modal.show();
+    }
+
+    async function saveDetails() {
+        const recordId = document.getElementById('details-record-id').value;
+        const notes = document.getElementById('completion-notes').value;
+        const photosInput = document.getElementById('completion-photos');
+
+        const formData = new FormData();
+        formData.append('notes', notes);
+        for (const file of photosInput.files) {
+            formData.append('photos', file);
+        }
+
+        const response = await fetch(`/api/completed_records/${recordId}/details`, {
+            method: 'POST',
+            body: formData // 使用 FormData 时不需要设置 Content-Type header
+        });
+
+        if (response.ok) {
+            const modal = bootstrap.Modal.getInstance(document.getElementById('detailsModal'));
+            modal.hide();
+            await fetchAndRenderCompletedRecords();
+        } else {
+            const error = await response.json();
+            alert(`保存失败: ${error.error}`);
+        }
+    }
+
+    document.addEventListener('DOMContentLoaded', () => {
+        if (['/login', '/register'].includes(window.location.pathname)) return;
+        fetchAndRenderCompletedRecords();
+    });
+</script>
+{% endblock %}

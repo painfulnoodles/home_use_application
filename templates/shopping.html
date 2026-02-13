@@ -30,6 +30,11 @@
                         <label for="record-input" class="form-label">物品名称</label>
                         <input type="text" id="record-input" class="form-control" placeholder="例如：牛奶">
                     </div>
+                    <!-- **新增**: 日期选择 -->
+                    <div class="col-md-12 mb-2">
+                        <label for="record-date" class="form-label">日期（选填）</label>
+                        <input type="date" id="record-date" class="form-control">
+                    </div>
                     <div class="col-md-6">
                         <label for="record-quantity" class="form-label">数量（选填）</label>
                         <input type="number" id="record-quantity" class="form-control" placeholder="例如: 2">
@@ -102,6 +107,8 @@
                 li.innerHTML = `
                     <div>${itemDetails}</div>
                     <div>
+                        <!-- **新增**: 添加到记录按钮 -->
+                        <button class="btn btn-sm btn-outline-info me-2" onclick="addShoppingItemToGeneral(${item.id})">添加到记录</button>
                         <button class="btn btn-sm btn-outline-primary me-2" onclick='openEditShoppingItemModal(${JSON.stringify(item)})'>编辑</button>
                         <button class="btn btn-sm btn-success me-2" onclick="markAsCompleted(${item.id})">已购买</button>
                         <a href="#" class="delete-btn" onclick="deleteShoppingItem(${item.id})">删除</a>
@@ -136,6 +143,7 @@
     // 添加新的购物项
     async function addShoppingItem() {
         const content = document.getElementById('record-input').value;
+        const date = document.getElementById('record-date').value; // **新增**
         const quantity = document.getElementById('record-quantity').value;
         const unit = document.getElementById('record-unit').value;
         const brand = document.getElementById('record-brand').value;
@@ -145,14 +153,15 @@
         await fetch('/api/records', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ content, quantity, unit, brand, category: CATEGORY })
+            body: JSON.stringify({ content, date, quantity, unit, brand, category: CATEGORY }) // **修改**
         });
         
         document.getElementById('record-input').value = '';
+        document.getElementById('record-date').value = ''; // **新增**
         document.getElementById('record-quantity').value = '';
         document.getElementById('record-unit').value = '';
         document.getElementById('record-brand').value = '';
-
+        
         // 关闭模态框
         const modal = bootstrap.Modal.getInstance(document.getElementById('addShoppingItemModal'));
         if (modal) {
@@ -170,10 +179,11 @@
 
         modalTitle.textContent = '编辑购物项';
         document.getElementById('record-input').value = item.content;
+        document.getElementById('record-date').value = item.date || ''; // **新增**
         document.getElementById('record-quantity').value = item.quantity || '';
         document.getElementById('record-unit').value = item.unit || '';
         document.getElementById('record-brand').value = item.brand || '';
-
+        
         confirmButton.textContent = '确认修改';
         confirmButton.onclick = () => updateShoppingItem(item.id);
         
@@ -187,6 +197,7 @@
         
         modalTitle.textContent = '添加购物项';
         document.getElementById('record-input').value = '';
+        document.getElementById('record-date').value = ''; // **新增**
         document.getElementById('record-quantity').value = '';
         document.getElementById('record-unit').value = '';
         document.getElementById('record-brand').value = '';
@@ -199,6 +210,7 @@
     async function updateShoppingItem(id) {
         const payload = {
             content: document.getElementById('record-input').value,
+            date: document.getElementById('record-date').value, // **新增**
             quantity: document.getElementById('record-quantity').value,
             unit: document.getElementById('record-unit').value,
             brand: document.getElementById('record-brand').value,
@@ -217,6 +229,21 @@
         modal.hide();
 
         fetchAllShoppingItems();
+    }
+
+    // **新增**: 将购物项添加到通用记录
+    async function addShoppingItemToGeneral(shoppingId) {
+        const response = await fetch(`/api/shopping/${shoppingId}/to_general`, {
+            method: 'POST'
+        });
+
+        if (response.ok) {
+            alert('已成功添加到主页通用记录！');
+        } else {
+            const error = await response.json();
+            alert(`操作失败: ${error.error}`);
+        }
+        // 不需要刷新购物清单页面
     }
 
     // 标记为已购买
@@ -247,7 +274,10 @@
         fetchAllShoppingItems();
     }
 
-    // 页面加载时获取所有数据
-    window.onload = () => fetchAllShoppingItems();
+    // **修改**: 页面加载时获取所有数据
+    document.addEventListener('DOMContentLoaded', () => {
+        if (['/login', '/register'].includes(window.location.pathname)) return;
+        fetchAllShoppingItems();
+    });
 </script>
 {% endblock %}

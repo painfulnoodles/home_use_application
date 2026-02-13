@@ -21,7 +21,14 @@
 <body>
     <nav class="navbar navbar-dark bg-primary">
         <div class="container-fluid">
-            <span class="navbar-brand mb-0 h1">📝 我的记录本</span>
+            <a class="navbar-brand mb-0 h1" href="/">📝 我的记录本</a>
+            <div id="user-nav-info" class="d-none text-white d-flex align-items-center">
+                <!-- **新增**: 个人中心链接 -->
+                <a href="/profile" class="text-white text-decoration-none me-3">个人中心</a>
+                <img id="user-avatar" src="" class="rounded-circle" width="30" height="30" alt="avatar">
+                <span id="username-display" class="ms-2"></span>
+                <a href="/logout" class="btn btn-sm btn-outline-light ms-3">登出</a>
+            </div>
         </div>
     </nav>
 
@@ -35,55 +42,35 @@
 
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
     <script>
-        // 通用记录处理脚本
-        async function fetchRecords(category) {
-            const response = await fetch(`/api/records?category=${category}`);
-            const records = await response.json();
-            const list = document.getElementById('record-list');
-            list.innerHTML = '';
-            records.forEach(record => {
-                const li = document.createElement('li');
-                li.className = 'list-group-item d-flex justify-content-between align-items-center';
+        // 全局脚本，处理用户认证和导航栏
+        document.addEventListener('DOMContentLoaded', async function() {
+            const isAuthPage = ['/login', '/register'].includes(window.location.pathname);
+
+            if (isAuthPage) {
+                // 如果在登录/注册页，不需要检查用户信息，直接返回
+                return;
+            }
+
+            try {
+                const response = await fetch('/api/user/current');
+                if (!response.ok) {
+                    // 如果获取用户信息失败（例如session过期），重定向到登录页
+                    window.location.href = '/login';
+                    return;
+                }
+                const user = await response.json();
                 
-                const urgencyBadge = record.urgency ? `<span class="badge bg-${record.urgency === '高' ? 'danger' : (record.urgency === '中' ? 'warning' : 'secondary')} me-2">${record.urgency}</span>` : '';
+                // 显示用户信息
+                const userNav = document.getElementById('user-nav-info');
+                document.getElementById('username-display').textContent = `欢迎, ${user.username}`;
+                document.getElementById('user-avatar').src = user.avatar || 'https://via.placeholder.com/30'; // 默认头像
+                userNav.classList.remove('d-none');
 
-                li.innerHTML = `
-                    <div>
-                        ${urgencyBadge}
-                        <span>${record.content}</span>
-                        <div class="record-meta">${record.date || ''} ${record.time || ''}</div>
-                    </div>
-                    <a href="#" class="delete-btn" onclick="deleteRecord(${record.id}, '${category}')">删除</a>
-                `;
-                list.appendChild(li);
-            });
-        }
-
-        async function addRecord(category) {
-            const content = document.getElementById('record-input').value;
-            const date = document.getElementById('record-date').value;
-            const time = document.getElementById('record-time').value;
-            const urgency = document.getElementById('record-urgency').value;
-
-            if (!content) return alert('内容不能为空！');
-
-            await fetch('/api/records', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ content, category, date, time, urgency })
-            });
-            
-            document.getElementById('record-input').value = '';
-            fetchRecords(category);
-        }
-
-        async function deleteRecord(id, category) {
-            if (!confirm('确定要删除这条记录吗？')) return;
-            
-            await fetch(`/api/records/${id}`, { method: 'DELETE' });
-            
-            fetchRecords(category);
-        }
+            } catch (error) {
+                console.error('Authentication check failed', error);
+                window.location.href = '/login';
+            }
+        });
     </script>
     {% block body_script %}{% endblock %}
 </body>

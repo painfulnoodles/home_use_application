@@ -44,7 +44,7 @@
     </button>
 </div>
 
-<!-- 添加药品的模态框 -->
+<!-- 添加药品的模态框 (已存在) -->
 <div class="modal fade" id="addMedicineModal" tabindex="-1" aria-labelledby="addMedicineModalLabel" aria-hidden="true">
     <div class="modal-dialog">
         <div class="modal-content">
@@ -63,12 +63,18 @@
                 </div>
                 <div class="row g-2 mb-3">
                     <div class="col">
-                        <label for="medicine-frequency-input" class="form-label">用药频率 (选填)</label>
-                        <input type="text" id="medicine-frequency-input" class="form-control" placeholder="例如: 每天3次">
+                        <label for="medicine-frequency-input" class="form-label">每天次数 (选填)</label>
+                        <div class="input-group">
+                            <input type="number" id="medicine-frequency-input" class="form-control" placeholder="例如: 3">
+                            <span class="input-group-text">次</span>
+                        </div>
                     </div>
                     <div class="col">
                         <label for="medicine-dosage-input" class="form-label">每次用量 (选填)</label>
-                        <input type="text" id="medicine-dosage-input" class="form-control" placeholder="例如: 2片">
+                        <div class="input-group">
+                            <input type="number" id="medicine-dosage-input" class="form-control" placeholder="例如: 2">
+                            <span class="input-group-text">片</span>
+                        </div>
                     </div>
                 </div>
                 <div class="row g-2 mb-3">
@@ -85,6 +91,23 @@
                         <input type="color" id="medicine-color-input" class="form-control form-control-color" value="#86B7FE" title="选择颜色">
                     </div>
                 </div>
+
+                <!-- 修改：将初始数量和补充数量分开，以便独立控制 -->
+                <div id="add-total-quantity-row" class="mb-3">
+                    <label for="medicine-total-quantity-input" class="form-label">初始总数量（片，选填）</label>
+                    <input type="number" id="medicine-total-quantity-input" class="form-control" placeholder="例如：30">
+                </div>
+                <div class="mb-3">
+                    <label for="medicine-refill-quantity-input" class="form-label">每次补充数量（选填）</label>
+                    <input type="number" id="medicine-refill-quantity-input" class="form-control" placeholder="例如：60">
+                </div>
+                <div class="mb-3">
+                    <label for="medicine-reminder-threshold-input" class="form-label">库存提醒阈值（选填）</label>
+                    <div class="input-group">
+                        <input type="number" id="medicine-reminder-threshold-input" class="form-control" placeholder="默认: 5">
+                        <span class="input-group-text">片</span>
+                    </div>
+                </div>
             </div>
             <div class="modal-footer">
                 <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">关闭</button>
@@ -94,16 +117,34 @@
     </div>
 </div>
 
+<!-- **新增**: 更新药品数量的模态框 -->
+<div class="modal fade" id="refillMedicineModal" tabindex="-1" aria-labelledby="refillMedicineModalLabel" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="refillMedicineModalLabel">更新药品数量</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <p>正在更新药品: <strong id="refill-medicine-name"></strong></p>
+                <div class="mb-3">
+                    <label for="refill-total-quantity-input" class="form-label">新的总数量</label>
+                    <input type="number" id="refill-total-quantity-input" class="form-control" placeholder="输入当前持有的总数量">
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">关闭</button>
+                <button type="button" class="btn btn-primary" id="confirm-refill-btn">确认更新</button>
+            </div>
+        </div>
+    </div>
+</div>
+
 
 <!-- 显示列表 -->
 <div class="row mt-4">
     <div class="col-12">
-        <div class="card mb-3">
-            <div class="card-header">需要购买的药品</div>
-            <ul id="needs-purchase-list" class="list-group list-group-flush">
-                <li class="list-group-item text-muted">暂无需要购买的药品。</li>
-            </ul>
-        </div>
+        <!-- **移除**: "需要购买的药品"卡片 -->
         <div id="medicine-display-area">
             <!-- 按人物分类的药品列表将在这里动态生成 -->
         </div>
@@ -138,6 +179,10 @@
             dosage: document.getElementById('medicine-dosage-input').value,
             style: document.getElementById('medicine-style-select').value,
             color: document.getElementById('medicine-color-input').value,
+            total_quantity: document.getElementById('medicine-total-quantity-input').value,
+            refill_quantity: document.getElementById('medicine-refill-quantity-input').value,
+            reminder_threshold: document.getElementById('medicine-reminder-threshold-input').value,
+            start_date: new Date().toISOString().split('T')[0], // 添加时自动设置为今天
             category: CATEGORY
         };
 
@@ -156,6 +201,10 @@
         document.getElementById('medicine-content-input').value = '';
         document.getElementById('medicine-frequency-input').value = '';
         document.getElementById('medicine-dosage-input').value = '';
+        document.getElementById('medicine-total-quantity-input').value = '';
+        document.getElementById('medicine-refill-quantity-input').value = '';
+        document.getElementById('medicine-reminder-threshold-input').value = '';
+        // 移除对不存在的 start_date 输入框的引用
 
         // 关闭模态框
         const modal = bootstrap.Modal.getInstance(document.getElementById('addMedicineModal'));
@@ -165,7 +214,6 @@
 
         await fetchAndDisplayMedicines();
     }
-    
 
     // 更新药品记录
     async function updateMedicine(id) {
@@ -176,6 +224,9 @@
             dosage: document.getElementById('medicine-dosage-input').value,
             style: document.getElementById('medicine-style-select').value,
             color: document.getElementById('medicine-color-input').value,
+            refill_quantity: document.getElementById('medicine-refill-quantity-input').value,
+            reminder_threshold: document.getElementById('medicine-reminder-threshold-input').value,
+            // 移除 total_quantity，编辑操作不修改数量
             category: CATEGORY
         };
 
@@ -194,106 +245,6 @@
 
         await fetchAndDisplayMedicines();
     }
-    
-    // 删除记录
-    async function deleteMedicine(id) {
-        if (!confirm('确定要删除这个药品记录吗？')) return;
-        await fetch(`/api/records/${id}`, { method: 'DELETE' });
-        await fetchAndDisplayMedicines();
-    }
-
-    // 切换购买需求
-    async function toggleNeedsPurchase(id, currentState) {
-        await fetch(`/api/records/${id}/purchase`, {
-            method: 'PUT',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ needs_purchase: !currentState })
-        });
-        await fetchAndDisplayMedicines();
-    }
-
-    // 获取并显示药品
-    async function fetchAndDisplayMedicines() {
-        const response = await fetch(`/api/records?category=${CATEGORY}`);
-        const peopleWithMedicines = await response.json();
-        const displayArea = document.getElementById('medicine-display-area');
-        const purchaseList = document.getElementById('needs-purchase-list');
-        displayArea.innerHTML = '';
-        purchaseList.innerHTML = '';
-        let needsPurchaseCount = 0;
-
-        if (peopleWithMedicines.length === 0) {
-            displayArea.innerHTML = '<p class="text-muted">还没有任何药品记录。</p>';
-            purchaseList.innerHTML = '<li class="list-group-item text-muted">暂无需要购买的药品。</li>';
-            return;
-        }
-
-        peopleWithMedicines.forEach(person => {
-            const personCard = document.createElement('div');
-            personCard.className = 'card mb-3';
-            
-            let itemsHtml = '<ul class="list-group list-group-flush">';
-            person.items.forEach(item => {
-                const style = item.style || 'circle';
-                const color = item.color || '#86B7FE';
-                // 对三角形特殊处理，因为它使用 border-color 而不是 background-color
-                const styleAttr = style === 'triangle' 
-                    ? `border-bottom-color: ${color};` 
-                    : `background-color: ${color};`;
-                const shapeHtml = `<span class="medicine-shape shape-${style}" style="${styleAttr}"></span>`;
-                const purchaseBtnText = item.needs_purchase ? '取消购买' : '需要购买';
-                const purchaseBtnClass = item.needs_purchase ? 'btn-secondary' : 'btn-warning';
-
-                // 构建频率和用量文本，如果为空则不显示
-                let detailsText = [item.frequency, item.dosage].filter(Boolean).join(' / ');
-                if (!detailsText) {
-                    detailsText = '未指定用量';
-                }
-
-                itemsHtml += `
-                    <li class="list-group-item d-flex justify-content-between align-items-center">
-                        <div>
-                            ${shapeHtml}
-                            <strong>${item.content}</strong>
-                            <small class="text-muted d-block">${detailsText}</small>
-                        </div>
-                        <div>
-                            <button class="btn btn-sm btn-outline-primary me-2" onclick='openEditMedicineModal(${JSON.stringify(item)}, ${person.person_id})'>编辑</button>
-                            <button class="btn btn-sm ${purchaseBtnClass} me-2" onclick="toggleNeedsPurchase(${item.id}, ${item.needs_purchase})">${purchaseBtnText}</button>
-                            <a href="#" class="delete-btn" onclick="deleteMedicine(${item.id})">删除</a>
-                        </div>
-                    </li>
-                `;
-
-                if (item.needs_purchase) {
-                    needsPurchaseCount++;
-                    const purchaseLi = document.createElement('li');
-                    purchaseLi.className = 'list-group-item d-flex align-items-center';
-                    purchaseLi.innerHTML = `${shapeHtml} <div><strong>${item.content}</strong> <small class="text-muted d-block">(属于: ${person.person_name})</small></div>`;
-                    purchaseList.appendChild(purchaseLi);
-                }
-            });
-            itemsHtml += '</ul>';
-
-            personCard.innerHTML = `
-                <div class="card-header">
-                    <h5>${person.person_name}</h5>
-                </div>
-                ${itemsHtml}
-            `;
-            displayArea.appendChild(personCard);
-        });
-
-        if (needsPurchaseCount === 0) {
-            purchaseList.innerHTML = '<li class="list-group-item text-muted">暂无需要购买的药品。</li>';
-        }
-    }
-
-    // 页面加载时初始化
-    window.onload = async () => {
-        await fetchAndPopulatePeople();
-        await fetchAndDisplayMedicines();
-    };
 
     // 打开药品编辑模态框
     function openEditMedicineModal(item, personId) {
@@ -308,6 +259,11 @@
         document.getElementById('medicine-dosage-input').value = item.dosage || '';
         document.getElementById('medicine-style-select').value = item.style || 'circle';
         document.getElementById('medicine-color-input').value = item.color || '#86B7FE';
+        document.getElementById('medicine-refill-quantity-input').value = item.refill_quantity || '';
+        document.getElementById('medicine-reminder-threshold-input').value = item.reminder_threshold || '';
+        
+        // 修改：只隐藏“初始总数量”输入框
+        document.getElementById('add-total-quantity-row').style.display = 'none';
 
         confirmButton.textContent = '确认修改';
         confirmButton.onclick = () => updateMedicine(item.id);
@@ -324,37 +280,138 @@
         document.getElementById('medicine-content-input').value = '';
         document.getElementById('medicine-frequency-input').value = '';
         document.getElementById('medicine-dosage-input').value = '';
+        document.getElementById('medicine-total-quantity-input').value = '';
+        document.getElementById('medicine-refill-quantity-input').value = '';
+        document.getElementById('medicine-reminder-threshold-input').value = '';
+        
+        // 修改：确保“初始总数量”输入框在下次打开“添加”模态框时是可见的
+        document.getElementById('add-total-quantity-row').style.display = 'block';
         
         confirmButton.textContent = '确认添加';
         confirmButton.onclick = addMedicine;
     });
 
-    // 更新药品记录
-    async function updateMedicine(id) {
-        const payload = {
-            person_id: document.getElementById('person-select').value,
-            content: document.getElementById('medicine-content-input').value,
-            frequency: document.getElementById('medicine-frequency-input').value,
-            dosage: document.getElementById('medicine-dosage-input').value,
-            style: document.getElementById('medicine-style-select').value,
-            color: document.getElementById('medicine-color-input').value,
-            category: CATEGORY
-        };
+    // 新增：打开补充药品模态框
+    function openRefillModal(item) {
+        const modal = new bootstrap.Modal(document.getElementById('refillMedicineModal'));
+        document.getElementById('refill-medicine-name').textContent = item.content;
+        const quantityInput = document.getElementById('refill-total-quantity-input');
+        quantityInput.value = item.total_quantity || '';
+        
+        const confirmBtn = document.getElementById('confirm-refill-btn');
+        confirmBtn.onclick = () => refillMedicine(item.id);
 
-        if (!payload.person_id || !payload.content) {
-            return alert('请选择人物并填写药品名称！');
+        modal.show();
+    }
+
+    // 新增：执行补充药品操作
+    async function refillMedicine(id) {
+        const newQuantity = document.getElementById('refill-total-quantity-input').value;
+        if (!newQuantity || newQuantity < 0) {
+            return alert('请输入有效的药品数量！');
         }
 
-        await fetch(`/api/records/${id}`, {
+        await fetch(`/api/records/${id}/quantity`, {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(payload)
+            body: JSON.stringify({ total_quantity: newQuantity })
         });
 
-        const modal = bootstrap.Modal.getInstance(document.getElementById('addMedicineModal'));
+        const modal = bootstrap.Modal.getInstance(document.getElementById('refillMedicineModal'));
         modal.hide();
-
         await fetchAndDisplayMedicines();
     }
+
+    // 获取并按人物分组显示药品
+    async function fetchAndDisplayMedicines() {
+        const response = await fetch(`/api/records?category=${CATEGORY}`);
+        const peopleWithMedicines = await response.json();
+        const displayArea = document.getElementById('medicine-display-area');
+        displayArea.innerHTML = '';
+
+        if (peopleWithMedicines.length === 0) {
+            displayArea.innerHTML = '<p class="text-muted">还没有任何药品记录。</p>';
+        }
+
+        peopleWithMedicines.forEach(person => {
+            const personCard = document.createElement('div');
+            personCard.className = 'card mb-3';
+            
+            let itemsHtml = '<ul class="list-group list-group-flush">';
+            person.items.forEach(item => {
+                const shapeHtml = item.style ? `<span class="medicine-shape shape-${item.style}" style="${item.style === 'triangle' ? 'border-bottom-color' : 'background-color'}: ${item.color || '#86B7FE'};"></span>` : '';
+
+                // 构建频率和用量文本
+                let detailsText = '未指定用量';
+                if (item.frequency && item.dosage) {
+                    detailsText = `每天 ${item.frequency} 次 / 每次 ${item.dosage} 片`;
+                } else if (item.frequency) {
+                    detailsText = `每天 ${item.frequency} 次`;
+                } else if (item.dosage) {
+                    detailsText = `每次 ${item.dosage} 片`;
+                }
+
+
+                // 修改：直接显示当前库存，而不是计算剩余量
+                if (typeof item.total_quantity === 'number') {
+                    detailsText += ` · 当前库存 ${item.total_quantity} 片`;
+                }
+
+                const purchaseBtnClass = item.needs_purchase ? 'btn-warning' : 'btn-outline-secondary';
+                const purchaseBtnText = item.needs_purchase ? '已加入清单' : '加入购买清单';
+
+                itemsHtml += `
+                    <li class="list-group-item d-flex justify-content-between align-items-center">
+                        <div>
+                            ${shapeHtml}
+                            <strong>${item.content}</strong>
+                            <small class="text-muted d-block">${detailsText}</small>
+                        </div>
+                        <div>
+                            <button class="btn btn-sm btn-outline-success me-2" onclick='openRefillModal(${JSON.stringify(item)})'>更新药品数量</button>
+                            <button class="btn btn-sm btn-outline-primary me-2" onclick='openEditMedicineModal(${JSON.stringify(item)}, ${person.person_id})'>编辑</button>
+                            <button class="btn btn-sm ${purchaseBtnClass} me-2" onclick="toggleNeedsPurchase(${item.id}, ${item.needs_purchase})">${purchaseBtnText}</button>
+                            <a href="#" class="delete-btn" onclick="deleteMedicine(${item.id})">删除</a>
+                        </div>
+                    </li>
+                `;
+
+                // **移除**: 不再需要处理 needs_purchase 的逻辑
+            });
+            itemsHtml += '</ul>';
+
+            personCard.innerHTML = `
+                <div class="card-header"><h5>${person.person_name}</h5></div>
+                ${itemsHtml}
+            `;
+            displayArea.appendChild(personCard);
+        });
+
+        // **移除**: 不再需要检查 needsPurchaseCount
+    }
+
+    // 删除药品
+    async function deleteMedicine(id) {
+        if (!confirm('确定要删除这条药品记录吗？')) return;
+        await fetch(`/api/records/${id}`, { method: 'DELETE' });
+        await fetchAndDisplayMedicines();
+    }
+
+    // 切换购买需求
+    async function toggleNeedsPurchase(id, currentStatus) {
+        await fetch(`/api/records/${id}/purchase`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ needs_purchase: !currentStatus })
+        });
+        await fetchAndDisplayMedicines();
+    }
+    
+    // **修改**: 页面加载时初始化
+    document.addEventListener('DOMContentLoaded', async () => {
+        if (['/login', '/register'].includes(window.location.pathname)) return;
+        await fetchAndPopulatePeople();
+        await fetchAndDisplayMedicines();
+    });
 </script>
 {% endblock %}
