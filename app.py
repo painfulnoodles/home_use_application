@@ -393,11 +393,23 @@ def get_records():
         # 只有在获取 'pending' 状态的通用记录时才检查药品库存
         # (因为药品提醒总是 'pending' 状态)
         today_str = datetime.now().strftime('%Y-%m-%d')
-        cursor.execute("SELECT r.id, p.name, r.content, r.total_quantity, r.reminder_threshold FROM records r JOIN people p ON r.person_id = p.id WHERE r.category = 'medicine' AND r.user_id = ?", (user_id,))
+        
+        # **关键修复**: 使用 LEFT JOIN 代替 INNER JOIN
+        cursor.execute("""
+            SELECT r.id, p.name, r.content, r.total_quantity, r.reminder_threshold 
+            FROM records r 
+            LEFT JOIN people p ON r.person_id = p.id 
+            WHERE r.category = 'medicine' AND r.user_id = ?
+        """, (user_id,))
+
         for med_row_obj in cursor.fetchall():
             med_row = dict(med_row_obj)
             if med_row['total_quantity'] is not None and med_row['reminder_threshold'] is not None and med_row['total_quantity'] < med_row['reminder_threshold']:
-                reminder_content = f"库存警告: {med_row['name']}的'{med_row['content']}'数量不足 (剩余{med_row['total_quantity']}片, 阈值{med_row['reminder_threshold']}片)"
+                
+                # **关键修复**: 处理人物姓名可能为 None 的情况
+                person_name = med_row['name'] or '未知人物'
+                
+                reminder_content = f"库存警告: {person_name}的'{med_row['content']}'数量不足 (剩余{med_row['total_quantity']}片, 阈值{med_row['reminder_threshold']}片)"
                 medicine_reminders.append({"id": f"med_{med_row['id']}", "content": reminder_content, "category": "general", "date": today_str, "time": "08:00", "urgency": "高", "status": "pending", "is_medicine_reminder": True, "original_medicine_id": med_row['id']})
 
         sort_by = request.args.get('sort_by', 'urgency')
