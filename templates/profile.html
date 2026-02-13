@@ -62,6 +62,7 @@
     async function fetchUserInfo() {
         const response = await fetch('/api/user/current');
         const user = await response.json();
+        // **关键修复**: 直接使用后端返回的路径，因为它已经是 URL 路径了
         document.getElementById('profile-avatar').src = user.avatar ? `/${user.avatar}` : 'https://via.placeholder.com/120';
         document.getElementById('profile-username').textContent = user.username;
     }
@@ -130,7 +131,8 @@
                 let photosHtml = '';
                 if (photos.length > 0) {
                     photosHtml = `<div class="mt-2 d-flex flex-wrap gap-2">` +
-                        photos.map(p => `<img src="/${p}" class="img-thumbnail" width="80" height="80" alt="photo">`).join('') +
+                        // **关键修改**: 增大图片尺寸
+                        photos.map(p => `<img src="/${p}" class="img-thumbnail" width="500" height="500" alt="photo" style="object-fit: cover;">`).join('') +
                         `</div>`;
                 }
 
@@ -164,6 +166,7 @@
         const photos = record.completion_photos ? JSON.parse(record.completion_photos) : [];
         if (photos.length > 0) {
             photos.forEach(p => {
+                // **关键修复**: 直接使用 p，不再添加前导斜杠
                 photosContainer.innerHTML += `<img src="/${p}" class="img-thumbnail" width="60" height="60" alt="photo">`;
             });
             document.getElementById('existing-photos-container').classList.remove('d-none');
@@ -172,6 +175,23 @@
         }
 
         modal.show();
+    }
+
+    // **新增**: 删除已完成记录的函数
+    async function deleteCompletedRecord(recordId) {
+        if (!confirm('确定要永久删除这条已完成的记录吗？此操作不可恢复。')) return;
+
+        const response = await fetch(`/api/records/${recordId}`, {
+            method: 'DELETE'
+        });
+
+        if (response.ok) {
+            // 删除成功后，重新加载列表
+            await fetchAndRenderCompletedRecords();
+        } else {
+            const error = await response.json();
+            alert(`删除失败: ${error.error}`);
+        }
     }
 
     async function saveDetails() {

@@ -1,4 +1,4 @@
-from flask import Flask, request, jsonify, render_template, redirect, url_for
+from flask import Flask, request, jsonify, render_template, redirect, url_for, send_from_directory
 import sqlite3
 import os # <--- 1. 确保导入 os 模块
 from datetime import datetime
@@ -181,11 +181,15 @@ def upload_avatar():
         filepath = os.path.join(upload_folder, filename)
         file.save(filepath)
 
+        # **关键修复**: 将路径转换为 URL 格式 (使用正斜杠)
+        url_path = filepath.replace('\\', '/')
+
         # 更新数据库中的头像路径
         conn = _get_db_conn()
         cursor = conn.cursor()
         try:
-            cursor.execute("UPDATE users SET avatar = ? WHERE id = ?", (filepath, current_user.id))
+            # **关键修复**: 保存 URL 格式的路径
+            cursor.execute("UPDATE users SET avatar = ? WHERE id = ?", (url_path, current_user.id))
             conn.commit()
         except sqlite3.Error as e:
             conn.rollback()
@@ -194,7 +198,7 @@ def upload_avatar():
             conn.close()
         
         # 返回新的头像路径，以便前端更新
-        return jsonify({"status": "success", "avatar_url": f"/{filepath}"})
+        return jsonify({"status": "success", "avatar_url": f"/{url_path}"})
 
     return jsonify({"error": "文件上传失败"}), 500
 
@@ -222,16 +226,30 @@ def get_completed_records():
 @login_required
 def update_completed_details(record_id):
     notes = request.form.get('notes')
-    # 在实际应用中，这里需要处理文件上传和保存的逻辑
-    # 为简化，我们仅保存一个示意性的照片信息
     photos = request.files.getlist('photos')
-    photo_filenames = []
+    
+    photo_paths = []
     if photos:
-        # 伪代码：实际应保存文件并生成唯一文件名
+        upload_folder = 'uploads'
+        if not os.path.exists(upload_folder):
+            os.makedirs(upload_folder)
+        
+        import uuid
+        from werkzeug.utils import secure_filename
+
         for photo in photos:
-            # filename = secure_filename(photo.filename)
-            # photo.save(os.path.join(app.config['UPLOAD_FOLDER'], filename))
-            photo_filenames.append(f"uploads/{photo.filename}") # 示例路径
+            if photo and photo.filename != '':
+                # 使用 secure_filename 和 uuid 确保文件名安全且唯一
+                base_filename = secure_filename(photo.filename)
+                unique_filename = str(uuid.uuid4()) + os.path.splitext(base_filename)[1]
+                filepath = os.path.join(upload_folder, unique_filename)
+                
+                # **关键修复**: 保存文件到服务器
+                photo.save(filepath)
+                
+                # **关键修复**: 存储 URL 格式的相对路径 (使用正斜杠)
+                url_path = filepath.replace('\\', '/')
+                photo_paths.append(url_path)
 
     conn = _get_db_conn()
     cursor = conn.cursor()
@@ -242,19 +260,15 @@ def update_completed_details(record_id):
         if not record:
             return jsonify({"error": "记录不存在或权限不足"}), 404
         
-        # 更新感想
-        update_query = "UPDATE records SET completion_notes = ? WHERE id = ?"
-        params = [notes, record_id]
-
-        # 更新照片（追加模式）
-        if photo_filenames:
-            import json
-            existing_photos = json.loads(record['completion_photos']) if record['completion_photos'] else []
-            all_photos = existing_photos + photo_filenames
-            update_query = "UPDATE records SET completion_notes = ?, completion_photos = ? WHERE id = ?"
-            params = [notes, json.dumps(all_photos), record_id]
-
-        cursor.execute(update_query, tuple(params))
+        import json
+        # 获取已有的照片列表
+        existing_photos = json.loads(record['completion_photos']) if record['completion_photos'] else []
+        
+        # 将新上传的照片路径追加到列表中
+        all_photos = existing_photos + photo_paths
+        
+        # 更新感想和照片列表
+        cursor.execute("UPDATE records SET completion_notes = ?, completion_photos = ? WHERE id = ?", (notes, json.dumps(all_photos), record_id))
         conn.commit()
     except sqlite3.Error as e:
         conn.rollback()
@@ -675,6 +689,14 @@ def clear_shopping_list():
     finally:
         conn.close()
     return jsonify({"status": "success"})
+
+
+# --- 新增：为 uploads 目录提供静态文件服务 ---
+from flask import send_from_directory
+
+@app.route('/uploads/<filename>')
+def uploaded_file(filename):
+    return send_from_directory('uploads', filename)
 
 
 # --- 页面服务 ---
