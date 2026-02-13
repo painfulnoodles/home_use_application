@@ -25,7 +25,7 @@ def init_db():
     cursor = conn.cursor()
     print("Opened database successfully")
 
-    # --- 创建 users 表 ---
+    # --- 创建 users 表 (如果不存在) ---
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS users (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -35,55 +35,21 @@ def init_db():
         )
     ''')
 
-    # --- 修复 people 表结构 ---
-    # 1. 检查旧的 people 表是否存在
-    cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='people';")
-    people_table_exists = cursor.fetchone()
-
-    if people_table_exists:
-        # 2. 检查旧表是否包含 user_id 列
-        people_cols = [col[1] for col in cursor.execute("PRAGMA table_info(people)").fetchall()]
-        if 'user_id' not in people_cols:
-            # 如果是旧结构（没有 user_id），则删除重建
-            print("Recreating 'people' table with new schema...")
-            cursor.execute('DROP TABLE people')
-            cursor.execute('''
-                CREATE TABLE people (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    user_id INTEGER,
-                    name TEXT NOT NULL,
-                    UNIQUE(user_id, name)
-                )
-            ''')
-        else:
-            # 如果有 user_id 但约束可能不对，也重建它以确保正确性
-            # 注意：这将清除现有的人物数据。请在生产环境中谨慎操作。
-            print("Recreating 'people' table to ensure correct constraints...")
-            cursor.execute('DROP TABLE people')
-            cursor.execute('''
-                CREATE TABLE people (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    user_id INTEGER,
-                    name TEXT NOT NULL,
-                    UNIQUE(user_id, name)
-                )
-            ''')
-    else:
-        # 如果表不存在，直接创建
-        cursor.execute('''
-            CREATE TABLE people (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                user_id INTEGER,
-                name TEXT NOT NULL,
-                UNIQUE(user_id, name)
-            )
-        ''')
-
+    # --- 创建 people 表 (如果不存在) ---
+    # 这样修改后，它将不再删除现有数据
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS people (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER,
+            name TEXT NOT NULL,
+            FOREIGN KEY(user_id) REFERENCES users(id),
+            UNIQUE(user_id, name)
+        )
+    ''')
 
     # --- 检查并更新 records 表，添加 user_id ---
     records_cols = [col[1] for col in cursor.execute("PRAGMA table_info(records)").fetchall()]
     if 'user_id' not in records_cols:
-        # 这是一个简化的迁移，对于已有数据的旧表，可能需要更复杂的数据迁移策略
         cursor.execute('ALTER TABLE records ADD COLUMN user_id INTEGER')
 
     # --- 确保所有字段都存在 (用于旧数据库的迁移) ---
@@ -95,7 +61,6 @@ def init_db():
         'needs_purchase': 'INTEGER DEFAULT 0', 'dosage': 'TEXT', 'total_quantity': 'INTEGER',
         'start_date': 'TEXT', 'refill_quantity': 'INTEGER', 'reminder_threshold': 'INTEGER',
         'source_record_id': 'INTEGER', 'shopping_source_id': 'INTEGER',
-        # **新增**: 用于存储完成后的感想和照片
         'completion_notes': 'TEXT',
         'completion_photos': 'TEXT'
     }
@@ -103,7 +68,8 @@ def init_db():
         if field not in columns:
             cursor.execute(f'ALTER TABLE records ADD COLUMN {field} {definition}')
 
-    # --- 更新表结构定义 ---
+    # --- 创建 records 表 (如果不存在) ---
+    # 确保 records 表的定义是最新的
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS records (
             id INTEGER PRIMARY KEY AUTOINCREMENT, 
@@ -113,16 +79,9 @@ def init_db():
             frequency TEXT, style TEXT, needs_purchase INTEGER DEFAULT 0, dosage TEXT,
             total_quantity INTEGER, start_date TEXT, refill_quantity INTEGER,
             reminder_threshold INTEGER, source_record_id INTEGER, shopping_source_id INTEGER,
-            completion_notes TEXT, completion_photos TEXT
-        )
-    ''')
-
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS people (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            user_id INTEGER,
-            name TEXT NOT NULL,
-            UNIQUE(user_id, name)
+            completion_notes TEXT, completion_photos TEXT,
+            FOREIGN KEY(user_id) REFERENCES users(id),
+            FOREIGN KEY(person_id) REFERENCES people(id)
         )
     ''')
 
