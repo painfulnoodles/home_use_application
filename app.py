@@ -101,20 +101,23 @@ def login():
         data = request.get_json()
         username = data.get('username')
         password = data.get('password')
-        
-        conn = sqlite3.connect('database.db')
-        conn.row_factory = sqlite3.Row
-        cursor = conn.cursor()
-        cursor.execute("SELECT * FROM users WHERE username = ?", (username,))
-        user_row = cursor.fetchone()
-        conn.close()
+        conn = None # 初始化
+        try:
+            conn = sqlite3.connect('database.db', timeout=15)
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+            cursor.execute("SELECT * FROM users WHERE username = ?", (username,))
+            user_row = cursor.fetchone()
 
-        if user_row and check_password_hash(user_row['password_hash'], password):
-            user_obj = User(id=user_row['id'], username=user_row['username'], avatar=user_row['avatar'])
-            login_user(user_obj, remember=True)
-            return jsonify({"status": "success"})
-        
-        return jsonify({"error": "无效的用户名或密码"}), 401
+            if user_row and check_password_hash(user_row['password_hash'], password):
+                user_obj = User(id=user_row['id'], username=user_row['username'], avatar=user_row['avatar'])
+                login_user(user_obj, remember=True)
+                return jsonify({"status": "success"})
+            
+            return jsonify({"error": "无效的用户名或密码"}), 401
+        finally:
+            if conn:
+                conn.close()
     return render_template('login.html')
 
 @app.route('/register', methods=['GET', 'POST'])
@@ -130,17 +133,22 @@ def register():
             return jsonify({"error": "用户名和密码不能为空"}), 400
 
         password_hash = generate_password_hash(password)
-        
-        conn = sqlite3.connect('database.db')
-        cursor = conn.cursor()
+        conn = None
         try:
+            conn = sqlite3.connect('database.db', timeout=15)
+            cursor = conn.cursor()
             cursor.execute("INSERT INTO users (username, password_hash) VALUES (?, ?)", (username, password_hash))
             conn.commit()
+            return jsonify({"status": "success"}), 201
         except sqlite3.IntegrityError:
+            conn.rollback()
             return jsonify({"error": "用户名已存在"}), 409
+        except sqlite3.Error as e:
+            if conn: conn.rollback()
+            return jsonify({"error": str(e)}), 500
         finally:
-            conn.close()
-        return jsonify({"status": "success"}), 201
+            if conn:
+                conn.close()
     return render_template('register.html')
 
 @app.route('/logout')
@@ -421,115 +429,119 @@ def get_person_details(person_id):
 @login_required
 def get_records():
     category = request.args.get('category', 'general')
-    conn = sqlite3.connect('database.db')
-    conn.row_factory = sqlite3.Row
-    cursor = conn.cursor()
-    user_id = current_user.id
-    records = []
+    conn = None
+    try:
+        conn = sqlite3.connect('database.db', timeout=15)
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+        user_id = current_user.id
+        records = []
 
-    if category == 'medicine':
-        # --- 新增：自动计算和更新药品数量的逻辑 ---
-        try:
+        if category == 'medicine':
+            # --- 关键重构：将读和写分离 ---
+            # 步骤1: 读取所有药品
             cursor.execute("SELECT * FROM records WHERE category = 'medicine' AND user_id = ?", (user_id,))
             medicines_to_update = cursor.fetchall()
             today = datetime.now().date()
+            updates_to_perform = []
 
             for med in medicines_to_update:
-                # 确保所有必需字段都存在且有效
                 if med['start_date'] and med['total_quantity'] is not None and med['frequency'] and med['dosage']:
                     try:
                         start_date = datetime.strptime(med['start_date'], '%Y-%m-%d').date()
-                        
-                        # 只有当上次更新日期是今天之前才进行计算
+                        # 确保频率和用量是数字
+                        frequency = int(med['frequency'])
+                        dosage = int(med['dosage'])
+
                         if start_date < today:
                             days_passed = (today - start_date).days
-                            daily_consumption = int(med['frequency']) * int(med['dosage'])
-                            total_consumption = days_passed * daily_consumption
-                            
+                            total_consumption = days_passed * frequency * dosage
                             new_quantity = med['total_quantity'] - total_consumption
-                            # 确保数量不会变成负数
                             if new_quantity < 0:
                                 new_quantity = 0
-                            
-                            # 更新数据库
-                            cursor.execute(
-                                "UPDATE records SET total_quantity = ?, start_date = ? WHERE id = ?",
-                                (new_quantity, today.strftime('%Y-%m-%d'), med['id'])
-                            )
+                            # 收集需要执行的更新，而不是立即执行
+                            updates_to_perform.append((new_quantity, today.strftime('%Y-%m-%d'), med['id']))
                     except (ValueError, TypeError):
-                        # 如果频率或用量不是有效的数字，或者日期格式错误，则跳过
+                        # 如果 frequency 或 dosage 不是有效数字，或者日期格式错误，则安全地跳过
+                        print(f"Skipping update for medicine ID {med['id']} due to invalid data.")
                         continue
-            conn.commit() # 提交所有更新
-        except sqlite3.Error as e:
-            print(f"Error updating medicine quantities: {e}")
-            conn.rollback()
-        # --- 自动更新逻辑结束 ---
+            
+            # 步骤2: 一次性执行所有更新
+            if updates_to_perform:
+                cursor.executemany("UPDATE records SET total_quantity = ?, start_date = ? WHERE id = ?", updates_to_perform)
+                conn.commit()
 
-        # 继续执行原有的查询逻辑，以获取刚刚更新完的数据
-        query = "SELECT p.id as person_id, p.name as person_name, r.* FROM records r JOIN people p ON r.person_id = p.id WHERE r.category = ? AND r.user_id = ? ORDER BY p.name, r.id"
-        cursor.execute(query, (category, user_id))
-        items_by_person = {}
-        for row_obj in cursor.fetchall():
-            row = dict(row_obj)
-            person_id = row['person_id']
-            if person_id not in items_by_person:
-                items_by_person[person_id] = {"person_id": person_id, "person_name": row['person_name'], "items": []}
-            items_by_person[person_id]['items'].append(row)
-        records = list(items_by_person.values())
-
-    elif category in ['clothes']: # **修改**: 将 clothes 也移到这里
-        query = "SELECT p.id as person_id, p.name as person_name, r.* FROM records r JOIN people p ON r.person_id = p.id WHERE r.category = ? AND r.user_id = ? ORDER BY p.name, r.id"
-        cursor.execute(query, (category, user_id))
-        items_by_person = {}
-        for row_obj in cursor.fetchall():
-            row = dict(row_obj)
-            person_id = row['person_id']
-            if person_id not in items_by_person:
-                items_by_person[person_id] = {"person_id": person_id, "person_name": row['person_name'], "items": []}
-            items_by_person[person_id]['items'].append(row)
-        records = list(items_by_person.values())
+            # 步骤3: 重新查询以获取最新数据
+            query = "SELECT p.id as person_id, p.name as person_name, r.* FROM records r JOIN people p ON r.person_id = p.id WHERE r.category = ? AND r.user_id = ? ORDER BY p.name, r.id"
+            cursor.execute(query, (category, user_id))
+            items_by_person = {}
+            for row_obj in cursor.fetchall():
+                row = dict(row_obj)
+                person_id = row['person_id']
+                if person_id not in items_by_person:
+                    items_by_person[person_id] = {"person_id": person_id, "person_name": row['person_name'], "items": []}
+                items_by_person[person_id]['items'].append(row)
+            records = list(items_by_person.values())
         
-    else: # category == 'general'
-        medicine_reminders = []
-        # 只有在获取 'pending' 状态的通用记录时才检查药品库存
-        # (因为药品提醒总是 'pending' 状态)
-        today_str = datetime.now().strftime('%Y-%m-%d')
+        elif category in ['clothes']: # **修改**: 将 clothes 也移到这里
+            query = "SELECT p.id as person_id, p.name as person_name, r.* FROM records r JOIN people p ON r.person_id = p.id WHERE r.category = ? AND r.user_id = ? ORDER BY p.name, r.id"
+            cursor.execute(query, (category, user_id))
+            items_by_person = {}
+            for row_obj in cursor.fetchall():
+                row = dict(row_obj)
+                person_id = row['person_id']
+                if person_id not in items_by_person:
+                    items_by_person[person_id] = {"person_id": person_id, "person_name": row['person_name'], "items": []}
+                items_by_person[person_id]['items'].append(row)
+            records = list(items_by_person.values())
         
-        # **关键修复**: 使用 LEFT JOIN 代替 INNER JOIN
-        cursor.execute("""
-            SELECT r.id, p.name, r.content, r.total_quantity, r.reminder_threshold 
-            FROM records r 
-            LEFT JOIN people p ON r.person_id = p.id 
-            WHERE r.category = 'medicine' AND r.user_id = ?
-        """, (user_id,))
+        else: # category == 'general'
+            medicine_reminders = []
+            # 只有在获取 'pending' 状态的通用记录时才检查药品库存
+            # (因为药品提醒总是 'pending' 状态)
+            today_str = datetime.now().strftime('%Y-%m-%d')
+            
+            # **关键修复**: 使用 LEFT JOIN 代替 INNER JOIN
+            cursor.execute("""
+                SELECT r.id, p.name, r.content, r.total_quantity, r.reminder_threshold 
+                FROM records r 
+                LEFT JOIN people p ON r.person_id = p.id 
+                WHERE r.category = 'medicine' AND r.user_id = ?
+            """, (user_id,))
 
-        for med_row_obj in cursor.fetchall():
-            med_row = dict(med_row_obj)
-            if med_row['total_quantity'] is not None and med_row['reminder_threshold'] is not None and med_row['total_quantity'] < med_row['reminder_threshold']:
-                
-                # **关键修复**: 处理人物姓名可能为 None 的情况
-                person_name = med_row['name'] or '未知人物'
-                
-                reminder_content = f"库存警告: {person_name}的'{med_row['content']}'数量不足 (剩余{med_row['total_quantity']}片, 阈值{med_row['reminder_threshold']}片)"
-                medicine_reminders.append({"id": f"med_{med_row['id']}", "content": reminder_content, "category": "general", "date": today_str, "time": "08:00", "urgency": "高", "status": "pending", "is_medicine_reminder": True, "original_medicine_id": med_row['id']})
+            for med_row_obj in cursor.fetchall():
+                med_row = dict(med_row_obj)
+                if med_row['total_quantity'] is not None and med_row['reminder_threshold'] is not None and med_row['total_quantity'] < med_row['reminder_threshold']:
+                    
+                    # **关键修复**: 处理人物姓名可能为 None 的情况
+                    person_name = med_row['name'] or '未知人物'
+                    
+                    reminder_content = f"库存警告: {person_name}的'{med_row['content']}'数量不足 (剩余{med_row['total_quantity']}片, 阈值{med_row['reminder_threshold']}片)"
+                    medicine_reminders.append({"id": f"med_{med_row['id']}", "content": reminder_content, "category": "general", "date": today_str, "time": "08:00", "urgency": "高", "status": "pending", "is_medicine_reminder": True, "original_medicine_id": med_row['id']})
 
-        sort_by = request.args.get('sort_by', 'urgency')
-        
-        order_clause = "ORDER BY date ASC, "
-        if sort_by == 'time':
-            order_clause += "time ASC, CASE urgency WHEN '高' THEN 1 WHEN '中' THEN 2 WHEN '低' THEN 3 ELSE 4 END"
-        else:
-            order_clause += "CASE urgency WHEN '高' THEN 1 WHEN '中' THEN 2 WHEN '低' THEN 3 ELSE 4 END, time ASC"
+            sort_by = request.args.get('sort_by', 'urgency')
+            
+            order_clause = "ORDER BY date ASC, "
+            if sort_by == 'time':
+                order_clause += "time ASC, CASE urgency WHEN '高' THEN 1 WHEN '中' THEN 2 WHEN '低' THEN 3 ELSE 4 END"
+            else:
+                order_clause += "CASE urgency WHEN '高' THEN 1 WHEN '中' THEN 2 WHEN '低' THEN 3 ELSE 4 END, time ASC"
 
-        # **关键修改**: 移除 status 的过滤，只获取 category='general' 的记录
-        # 同时，只显示 status='pending' 的记录
-        query = f"SELECT * FROM records WHERE category = ? AND status = 'pending' AND user_id = ? {order_clause}"
-        cursor.execute(query, (category, user_id))
-        general_records = [dict(row) for row in cursor.fetchall()]
-        records = medicine_reminders + general_records
-        
-    conn.close()
-    return jsonify(records)
+            # **关键修改**: 移除 status 的过滤，只获取 category='general' 的记录
+            # 同时，只显示 status='pending' 的记录
+            query = f"SELECT * FROM records WHERE category = ? AND status = 'pending' AND user_id = ? {order_clause}"
+            cursor.execute(query, (category, user_id))
+            general_records = [dict(row) for row in cursor.fetchall()]
+            records = medicine_reminders + general_records
+            
+        return jsonify(records)
+    except Exception as e:
+        # 添加一个顶层异常捕获，以便调试
+        print(f"An unexpected error occurred in get_records: {e}")
+        return jsonify({"error": "服务器内部错误"}), 500
+    finally:
+        if conn:
+            conn.close()
 
 @app.route('/api/records', methods=['POST'])
 @login_required
