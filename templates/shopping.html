@@ -84,7 +84,7 @@
 <script>
     const CATEGORY = 'shopping';
 
-    // 渲染列表的通用函数
+    // **关键修改**: 重构 renderList 函数以支持按日期分组
     function renderList(items, listId, isPending) {
         const list = document.getElementById(listId);
         list.innerHTML = '';
@@ -94,39 +94,71 @@
             return;
         }
 
-        items.forEach(item => {
-            const li = document.createElement('li');
-            li.className = 'list-group-item d-flex justify-content-between align-items-center';
-            
-            const itemDetails = `
-                <strong>${item.content}</strong>
-                <small class="text-muted ms-2">${item.quantity || ''} ${item.unit || ''} ${item.brand ? `(${item.brand})` : ''}</small>
-            `;
+        // 如果是“待购买”列表，则按日期分组
+        if (isPending) {
+            const itemsByDate = items.reduce((acc, item) => {
+                const date = item.date || '无日期';
+                if (!acc[date]) acc[date] = [];
+                acc[date].push(item);
+                return acc;
+            }, {});
 
-            if (isPending) {
-                li.innerHTML = `
-                    <div>${itemDetails}</div>
-                    <div>
-                        <!-- **新增**: 添加到记录按钮 -->
-                        <button class="btn btn-sm btn-outline-info me-2" onclick="addShoppingItemToGeneral(${item.id})">添加到记录</button>
-                        <button class="btn btn-sm btn-outline-primary me-2" onclick='openEditShoppingItemModal(${JSON.stringify(item)})'>编辑</button>
-                        <button class="btn btn-sm btn-success me-2" onclick="markAsCompleted(${item.id})">已购买</button>
-                        <a href="#" class="delete-btn" onclick="deleteShoppingItem(${item.id})">删除</a>
-                    </div>
-                `;
-            } else {
-                li.innerHTML = `
-                    <div class="text-decoration-line-through">${itemDetails}</div>
-                    <div>
-                        <!-- *** 新增恢复按钮 *** -->
-                        <button class="btn btn-sm btn-outline-warning me-2" onclick="markAsPending(${item.id})">恢复</button>
-                        <button class="btn btn-sm btn-outline-primary me-2" onclick='openEditShoppingItemModal(${JSON.stringify(item)})'>编辑</button>
-                        <a href="#" class="delete-btn" onclick="deleteShoppingItem(${item.id})">删除</a>
-                    </div>
-                `;
-            }
-            list.appendChild(li);
-        });
+            const sortedDates = Object.keys(itemsByDate).sort((a, b) => {
+                if (a === '无日期') return 1; // 无日期的排在最后
+                if (b === '无日期') return -1;
+                return new Date(a) - new Date(b); // 按日期升序
+            });
+
+            sortedDates.forEach(date => {
+                // 添加日期标题
+                const dateHeader = document.createElement('li');
+                dateHeader.className = 'list-group-item list-group-item-secondary fw-bold';
+                dateHeader.textContent = date;
+                list.appendChild(dateHeader);
+
+                // 渲染该日期的购物项
+                itemsByDate[date].forEach(item => {
+                    const li = createShoppingListItem(item, true);
+                    list.appendChild(li);
+                });
+            });
+        } else {
+            // “已购买”列表不分组，直接渲染
+            items.forEach(item => {
+                const li = createShoppingListItem(item, false);
+                list.appendChild(li);
+            });
+        }
+    }
+
+    // **新增**: 创建单个购物项 li 元素的辅助函数
+    function createShoppingListItem(item, isPending) {
+        const li = document.createElement('li');
+        li.className = 'list-group-item d-flex justify-content-between align-items-center';
+
+        const itemDetails = `
+            <strong>${item.content}</strong>
+            <small class="text-muted ms-2">${item.quantity || ''} ${item.unit || ''} ${item.brand ? `(${item.brand})` : ''}</small>
+        `;
+
+        let buttonsHtml = '';
+        if (isPending) {
+            buttonsHtml = `
+                <button class="btn btn-sm btn-outline-info me-2" onclick="addShoppingItemToGeneral(${item.id})">添加到记录</button>
+                <button class="btn btn-sm btn-outline-primary me-2" onclick='openEditShoppingItemModal(${JSON.stringify(item)})'>编辑</button>
+                <button class="btn btn-sm btn-success me-2" onclick="markAsCompleted(${item.id})">已购买</button>
+                <a href="#" class="delete-btn" onclick="deleteShoppingItem(${item.id})">删除</a>
+            `;
+            li.innerHTML = `<div>${itemDetails}</div><div>${buttonsHtml}</div>`;
+        } else {
+            buttonsHtml = `
+                <button class="btn btn-sm btn-outline-warning me-2" onclick="markAsPending(${item.id})">恢复</button>
+                <button class="btn btn-sm btn-outline-primary me-2" onclick='openEditShoppingItemModal(${JSON.stringify(item)})'>编辑</button>
+                <a href="#" class="delete-btn" onclick="deleteShoppingItem(${item.id})">删除</a>
+            `;
+            li.innerHTML = `<div class="text-decoration-line-through">${itemDetails}</div><div>${buttonsHtml}</div>`;
+        }
+        return li;
     }
 
     // 获取所有购物项并显示

@@ -291,14 +291,13 @@
         fetchAndRenderGeneralRecords();
     }
 
-    // 新增：标记药品为已购买并自动补充
-    async function markAsPurchased(recordId) {
+    // **关键修复**: 修改药品库存补充的逻辑
+    async function markAsPurchased(medicineId) {
         if (!confirm('确认已购买此药品吗？系统将自动为您补充库存。')) return;
 
-        const response = await fetch(`/api/records/${recordId}/purchase`, {
-            method: 'PUT',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ needs_purchase: false }) // This will trigger refill logic via status update
+        // 直接调用后端的自动补充逻辑
+        const response = await fetch(`/api/records/${medicineId}/refill`, {
+            method: 'POST'
         });
 
         if (response.ok) {

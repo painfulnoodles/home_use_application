@@ -495,51 +495,62 @@ def get_records():
                 items_by_person[person_id]['items'].append(row)
             records = list(items_by_person.values())
         
-        else: # category == 'general'
-            medicine_reminders = []
-            # 只有在获取 'pending' 状态的通用记录时才检查药品库存
-            # (因为药品提醒总是 'pending' 状态)
-            today_str = datetime.now().strftime('%Y-%m-%d')
+        else: # category == 'general' or 'shopping'
+            # **关键修复**: 只有在 category 是 'general' 时才执行提醒逻辑
+            if category == 'general':
+                reminders = []
+                today_str = datetime.now().strftime('%Y-%m-%d')
+                
+                # 1. 生成药品库存警告
+                cursor.execute("""
+                    SELECT r.id, p.name, r.content, r.total_quantity, r.reminder_threshold 
+                    FROM records r 
+                    LEFT JOIN people p ON r.person_id = p.id 
+                    WHERE r.category = 'medicine' AND r.user_id = ?
+                """, (user_id,))
+                for med_row_obj in cursor.fetchall():
+                    med_row = dict(med_row_obj)
+                    try:
+                        total_quantity = int(med_row['total_quantity'])
+                        reminder_threshold = int(med_row['reminder_threshold'])
+                        if total_quantity < reminder_threshold:
+                            person_name = med_row['name'] or '未知人物'
+                            reminder_content = f"库存警告: {person_name}的'{med_row['content']}'数量不足"
+                            reminders.append({"id": f"med_{med_row['id']}", "content": reminder_content, "category": "general", "date": today_str, "time": "08:00", "urgency": "高", "status": "pending", "is_dynamic_reminder": True})
+                    except (ValueError, TypeError, KeyError):
+                        continue
+
+                # 2. **新增**: 生成购物提醒
+                cursor.execute("SELECT DISTINCT date FROM records WHERE category = 'shopping' AND status = 'pending' AND date IS NOT NULL AND user_id = ?", (user_id,))
+                shopping_dates = [row['date'] for row in cursor.fetchall()]
+                for s_date in shopping_dates:
+                    reminders.append({"id": f"shop_{s_date}", "content": "有计划的购物任务", "category": "general", "date": s_date, "time": "09:00", "urgency": "中", "status": "pending", "is_dynamic_reminder": True})
+
+                # 3. 获取普通的通用记录
+                sort_by = request.args.get('sort_by', 'urgency')
+                order_clause = "ORDER BY date ASC, "
+                if sort_by == 'time':
+                    order_clause += "time ASC, CASE urgency WHEN '高' THEN 1 WHEN '中' THEN 2 WHEN '低' THEN 3 ELSE 4 END"
+                else:
+                    order_clause += "CASE urgency WHEN '高' THEN 1 WHEN '中' THEN 2 WHEN '低' THEN 3 ELSE 4 END, time ASC"
+
+                query = f"SELECT * FROM records WHERE category = ? AND status = 'pending' AND user_id = ? {order_clause}"
+                cursor.execute(query, (category, user_id))
+                general_records = [dict(row) for row in cursor.fetchall()]
+                
+                # 4. 合并并返回
+                records = reminders + general_records
             
-            # **关键修复**: 使用 LEFT JOIN 代替 INNER JOIN
-            cursor.execute("""
-                SELECT r.id, p.name, r.content, r.total_quantity, r.reminder_threshold 
-                FROM records r 
-                LEFT JOIN people p ON r.person_id = p.id 
-                WHERE r.category = 'medicine' AND r.user_id = ?
-            """, (user_id,))
-
-            for med_row_obj in cursor.fetchall():
-                med_row = dict(med_row_obj)
-                # **关键修复**: 在比较前，确保两个值都是整数
-                try:
-                    total_quantity = int(med_row['total_quantity'])
-                    reminder_threshold = int(med_row['reminder_threshold'])
-
-                    if total_quantity < reminder_threshold:
-                        # **关键修复**: 处理人物姓名可能为 None 的情况
-                        person_name = med_row['name'] or '未知人物'
-                        
-                        reminder_content = f"库存警告: {person_name}的'{med_row['content']}'数量不足 (剩余{total_quantity}片, 阈值{reminder_threshold}片)"
-                        medicine_reminders.append({"id": f"med_{med_row['id']}", "content": reminder_content, "category": "general", "date": today_str, "time": "08:00", "urgency": "高", "status": "pending", "is_medicine_reminder": True, "original_medicine_id": med_row['id']})
-                except (ValueError, TypeError, KeyError):
-                    # 如果转换失败或字段不存在，安全地跳过此条记录
-                    continue
-
-            sort_by = request.args.get('sort_by', 'urgency')
-            
-            order_clause = "ORDER BY date ASC, "
-            if sort_by == 'time':
-                order_clause += "time ASC, CASE urgency WHEN '高' THEN 1 WHEN '中' THEN 2 WHEN '低' THEN 3 ELSE 4 END"
-            else:
-                order_clause += "CASE urgency WHEN '高' THEN 1 WHEN '中' THEN 2 WHEN '低' THEN 3 ELSE 4 END, time ASC"
-
-            # **关键修改**: 移除 status 的过滤，只获取 category='general' 的记录
-            # 同时，只显示 status='pending' 的记录
-            query = f"SELECT * FROM records WHERE category = ? AND status = 'pending' AND user_id = ? {order_clause}"
-            cursor.execute(query, (category, user_id))
-            general_records = [dict(row) for row in cursor.fetchall()]
-            records = medicine_reminders + general_records
+            # **关键修复**: 为 shopping category 添加独立的、正确的处理逻辑
+            elif category == 'shopping':
+                status = request.args.get('status')
+                if status:
+                    query = "SELECT * FROM records WHERE category = ? AND status = ? AND user_id = ? ORDER BY date DESC, id DESC"
+                    cursor.execute(query, (category, status, user_id))
+                else: # 如果没有提供 status，则获取所有购物项
+                    query = "SELECT * FROM records WHERE category = ? AND user_id = ? ORDER BY date DESC, id DESC"
+                    cursor.execute(query, (category, user_id))
+                records = [dict(row) for row in cursor.fetchall()]
             
         return jsonify(records)
     except Exception as e:
@@ -569,7 +580,13 @@ def add_record():
         if category == 'clothes':
             cursor.execute("INSERT INTO records (user_id, content, category, person_id, type, color, quantity) VALUES (?, ?, ?, ?, ?, ?, ?)", (user_id, data['content'], 'clothes', person_id, data['type'], data['color'], data['quantity']))
         elif category == 'medicine':
-            cursor.execute("INSERT INTO records (user_id, content, category, person_id, frequency, dosage, style, color, total_quantity, start_date, refill_quantity, reminder_threshold) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", (user_id, data['content'], 'medicine', person_id, data.get('frequency'), data.get('dosage'), data['style'], data['color'], data.get('total_quantity'), data.get('start_date'), data.get('refill_quantity'), data.get('reminder_threshold')))
+            # **关键修复**: 为 reminder_threshold 设置默认值
+            reminder_threshold = data.get('reminder_threshold')
+            if not reminder_threshold:
+                reminder_threshold = 5 # 设置默认值为 5
+
+            cursor.execute("INSERT INTO records (user_id, content, category, person_id, frequency, dosage, style, color, total_quantity, start_date, refill_quantity, reminder_threshold) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", 
+                           (user_id, data['content'], 'medicine', person_id, data.get('frequency'), data.get('dosage'), data['style'], data['color'], data.get('total_quantity'), data.get('start_date'), data.get('refill_quantity'), reminder_threshold))
         elif category == 'shopping':
             cursor.execute("INSERT INTO records (user_id, content, category, date, quantity, unit, brand) VALUES (?, ?, 'shopping', ?, ?, ?, ?)", (user_id, data['content'], data.get('date'), data.get('quantity'), data.get('unit'), data.get('brand')))
         else:
@@ -602,7 +619,13 @@ def update_record(record_id):
         elif category == 'clothes':
             cursor.execute("UPDATE records SET person_id=?, content=?, type=?, color=?, quantity=? WHERE id=?", (data['person_id'], data['content'], data['type'], data['color'], data['quantity'], record_id))
         elif category == 'medicine':
-            cursor.execute("UPDATE records SET person_id=?, content=?, frequency=?, dosage=?, style=?, color=?, refill_quantity=?, reminder_threshold=? WHERE id=?", (data['person_id'], data['content'], data.get('frequency'), data.get('dosage'), data['style'], data['color'], data.get('refill_quantity'), data.get('reminder_threshold'), record_id))
+            # **关键修复**: 为 reminder_threshold 设置默认值
+            reminder_threshold = data.get('reminder_threshold')
+            if not reminder_threshold:
+                reminder_threshold = 5 # 设置默认值为 5
+
+            cursor.execute("UPDATE records SET person_id=?, content=?, frequency=?, dosage=?, style=?, color=?, refill_quantity=?, reminder_threshold=? WHERE id=?", 
+                           (data['person_id'], data['content'], data.get('frequency'), data.get('dosage'), data['style'], data['color'], data.get('refill_quantity'), reminder_threshold, record_id))
         conn.commit()
     except sqlite3.Error as e:
         conn.rollback()
@@ -614,30 +637,42 @@ def update_record(record_id):
 @app.route('/api/records/<int:record_id>', methods=['DELETE'])
 @login_required
 def delete_record(record_id):
-    conn = sqlite3.connect('database.db')
-    conn.row_factory = sqlite3.Row
-    cursor = conn.cursor()
-    user_id = current_user.id
+    conn = None
     try:
+        conn = sqlite3.connect('database.db', timeout=15)
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+        user_id = current_user.id
+        
         cursor.execute("SELECT category, source_record_id FROM records WHERE id = ? AND user_id = ?", (record_id, user_id))
         record = cursor.fetchone()
         if not record:
             return jsonify({"error": "记录不存在或权限不足"}), 404
         
+        # **关键修复**: 恢复并增强删除逻辑
+        # 如果删除的是一个购物清单项，且它来自一个药品
         if record['category'] == 'shopping' and record['source_record_id']:
+            # 将源药品的 needs_purchase 状态重置为 0
             cursor.execute("UPDATE records SET needs_purchase = 0 WHERE id = ? AND user_id = ?", (record['source_record_id'], user_id))
+        
+        # 如果删除的是一条药品记录
+        if record['category'] == 'medicine':
+            # 同时删除由它生成的、还存在于购物清单中的待购项
+            cursor.execute("DELETE FROM records WHERE category = 'shopping' AND source_record_id = ? AND user_id = ?", (record_id, user_id))
+
+        # 如果删除的是购物项，同时删除关联的通用记录 (此逻辑保留)
         if record['category'] == 'shopping':
-            # 当删除购物项时，同时删除关联的通用记录
             cursor.execute("DELETE FROM records WHERE category = 'general' AND shopping_source_id = ? AND user_id = ?", (record_id, user_id))
 
-        # 删除记录本身
+        # 最后，删除记录本身
         cursor.execute("DELETE FROM records WHERE id = ? AND user_id = ?", (record_id, user_id))
         conn.commit()
     except sqlite3.Error as e:
-        conn.rollback()
+        if conn: conn.rollback()
         return jsonify({"error": str(e)}), 500
     finally:
-        conn.close()
+        if conn:
+            conn.close()
     return jsonify({"status": "success"})
 
 @app.route('/api/records/<int:record_id>/status', methods=['PUT'])
@@ -645,47 +680,67 @@ def delete_record(record_id):
 def update_record_status(record_id):
     data = request.get_json()
     new_status = data.get('status')
-    if not new_status:
-        return jsonify({"error": "Status is required"}), 400
+    if not new_status in ['completed', 'pending']:
+        return jsonify({"error": "无效的状态"}), 400
 
-    conn = sqlite3.connect('database.db')
-    conn.row_factory = sqlite3.Row
+    conn = _get_db_conn()
     cursor = conn.cursor()
     user_id = current_user.id
     try:
+        # 1. 获取购物项信息，特别是 source_record_id
         cursor.execute("SELECT category, source_record_id FROM records WHERE id = ? AND user_id = ?", (record_id, user_id))
         record = cursor.fetchone()
-        if not record:
-            return jsonify({"error": "记录不存在或权限不足"}), 404
+        if not record or record['category'] != 'shopping':
+            return jsonify({"error": "购物项不存在或权限不足"}), 404
 
-        # --- 修改后的逻辑 ---
-        # 如果一个购物项的状态被更新（无论是 'completed' 还是 'pending'）
-        if record['category'] == 'shopping':
-            # 如果是标记为“完成”
-            if new_status == 'completed':
-                # 1. 如果这个购物项来自药品，自动补充库存
-                if record['source_record_id']:
-                    auto_refill_medicine(record['source_record_id'], user_id)
-                    cursor.execute("UPDATE records SET needs_purchase = 0 WHERE id = ? AND user_id = ?", (record['source_record_id'], user_id))
+        source_medicine_id = record['source_record_id']
 
-                # 2. 删除由这个购物项生成的通用记录
-                cursor.execute("DELETE FROM records WHERE category = 'general' AND shopping_source_id = ? AND user_id = ?", (record_id, user_id))
-
-            # 3. 更新购物项本身的状态 (无论是 'completed' 还是 'pending')
-            cursor.execute("UPDATE records SET status = ? WHERE id = ? AND user_id = ?", (new_status, record_id, user_id))
+        # 2. 如果购物项来自药品，执行核心联动逻辑
+        if source_medicine_id:
+            # 获取源药品的当前数量和预设的补充数量
+            cursor.execute("SELECT total_quantity, refill_quantity FROM records WHERE id = ? AND user_id = ?", (source_medicine_id, user_id))
+            medicine = cursor.fetchone()
+            if not medicine:
+                raise sqlite3.IntegrityError("源药品不存在，数据可能已损坏。")
             
-            conn.commit()
-            return jsonify({"status": "success", "message": "Shopping item status updated."})
-        # --- 逻辑修改结束 ---
+            refill_amount = medicine['refill_quantity']
+            if not refill_amount or refill_amount <= 0:
+                raise ValueError("源药品的'每次补充数量'未设置或无效。")
 
-        # 对于非购物项的普通状态更新（例如，将通用记录标记为完成）
-        cursor.execute("UPDATE records SET status = ? WHERE id = ? AND user_id = ?", (new_status, record_id, user_id))
+            current_total = medicine['total_quantity'] or 0
+            new_total = current_total
+
+            # 根据新的状态，增加或扣除药品数量
+            if new_status == 'completed':
+                # 标记为“已购买” -> 增加库存
+                new_total += refill_amount
+                # 将药品的“需要购买”状态取消
+                cursor.execute("UPDATE records SET needs_purchase = 0 WHERE id = ?", (source_medicine_id,))
+            elif new_status == 'pending':
+                # 恢复为“待购买” -> 扣除库存
+                new_total -= refill_amount
+                if new_total < 0: new_total = 0 # 防止库存变为负数
+                # 将药品的“需要购买”状态重新激活
+                cursor.execute("UPDATE records SET needs_purchase = 1 WHERE id = ?", (source_medicine_id,))
+            
+            # 更新药品的新总数和消耗计算起始日期
+            new_start_date = datetime.now().strftime('%Y-%m-%d')
+            cursor.execute("UPDATE records SET total_quantity = ?, start_date = ? WHERE id = ?", (new_total, new_start_date, source_medicine_id))
+
+        # 3. 更新购物项本身的状态
+        cursor.execute("UPDATE records SET status = ? WHERE id = ?", (new_status, record_id))
+
+        # 4. 如果是标记为“已购买”，同时删除由它生成的通用记录
+        if new_status == 'completed':
+            cursor.execute("DELETE FROM records WHERE category = 'general' AND shopping_source_id = ? AND user_id = ?", (record_id, user_id))
+
         conn.commit()
-    except sqlite3.Error as e:
-        conn.rollback()
+    except (sqlite3.Error, ValueError) as e:
+        if conn: conn.rollback()
         return jsonify({"error": str(e)}), 500
     finally:
-        conn.close()
+        if conn:
+            conn.close()
     return jsonify({"status": "success"})
 
 # --- 特定功能 API (已添加用户隔离) ---
@@ -728,6 +783,31 @@ def shopping_to_general(shopping_id):
             conn.close()
     return jsonify({"status": "success", "message": "General record created."}), 201
 
+# **新增**: 创建一个专门用于自动补充的 API 端点
+@app.route('/api/records/<int:record_id>/refill', methods=['POST'])
+@login_required
+def refill_medicine_from_purchase(record_id):
+    try:
+        # 直接调用内部函数，它包含了所有权验证和更新逻辑
+        auto_refill_medicine(record_id, current_user.id)
+        
+        # 同时，将药品的 needs_purchase 状态重置为 0
+        conn = _get_db_conn()
+        cursor = conn.cursor()
+        try:
+            cursor.execute("UPDATE records SET needs_purchase = 0 WHERE id = ? AND user_id = ?", (record_id, current_user.id))
+            conn.commit()
+        finally:
+            conn.close()
+
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
+    except sqlite3.Error as e:
+        return jsonify({"error": str(e)}), 500
+    
+    return jsonify({"status": "success", "message": "药品已补充"})
+
+
 def auto_refill_medicine(record_id, user_id):
     """内部函数，用于补充药品，需要被调用时提供用户上下文"""
     conn = _get_db_conn()
@@ -755,28 +835,47 @@ def toggle_medicine_purchase(record_id):
     cursor = conn.cursor()
     user_id = current_user.id
     try:
-        cursor.execute("SELECT id FROM records WHERE id = ? AND category = 'medicine' AND user_id = ?", (record_id, user_id))
-        if not cursor.fetchone():
+        cursor.execute("SELECT id, person_id FROM records WHERE id = ? AND category = 'medicine' AND user_id = ?", (record_id, user_id))
+        medicine_record = cursor.fetchone()
+        if not medicine_record:
             return jsonify({"error": "药品不存在或权限不足"}), 404
 
         cursor.execute("UPDATE records SET needs_purchase = ? WHERE id = ?", (1 if needs_purchase else 0, record_id))
+        
         if needs_purchase:
-            cursor.execute("SELECT r.content, p.name FROM records r JOIN people p ON r.person_id = p.id WHERE r.id = ?", (record_id,))
+            # **关键修复**: 使用 LEFT JOIN，并只查询需要的字段
+            cursor.execute("""
+                SELECT r.content, p.name 
+                FROM records r 
+                LEFT JOIN people p ON r.person_id = p.id 
+                WHERE r.id = ?
+            """, (record_id,))
             medicine_info = cursor.fetchone()
+
+            # **关键修复**: 即使 medicine_info 存在，也要处理 p.name 可能为 NULL 的情况
             if medicine_info:
-                shopping_content = f"药品: {medicine_info['name']} - {medicine_info['content']}"
-                cursor.execute("SELECT id FROM records WHERE category = 'shopping' AND content = ? AND status = 'pending' AND user_id = ?", (shopping_content, user_id))
+                person_name = medicine_info['name'] or '未指定人物'
+                shopping_content = f"药品: {person_name} - {medicine_info['content']}"
+                
+                # **关键修复**: 检查是否已存在，如果不存在则插入
+                cursor.execute("SELECT id FROM records WHERE category = 'shopping' AND source_record_id = ? AND user_id = ?", (record_id, user_id))
                 if not cursor.fetchone():
-                    cursor.execute("INSERT INTO records (user_id, content, category, status, source_record_id) VALUES (?, ?, 'shopping', 'pending', ?)", (user_id, shopping_content, record_id))
+                    # **关键修复**: 插入时包含 date
+                    record_date = datetime.now().strftime('%Y-%m-%d')
+                    cursor.execute("INSERT INTO records (user_id, content, category, status, source_record_id, date) VALUES (?, ?, 'shopping', 'pending', ?, ?)", (user_id, shopping_content, record_id, record_date))
         else:
-            cursor.execute("DELETE FROM records WHERE category = 'shopping' AND status = 'pending' AND source_record_id = ? AND user_id = ?", (record_id, user_id))
+            # 当取消购买需求时，直接通过 source_record_id 删除对应的购物项
+            cursor.execute("DELETE FROM records WHERE category = 'shopping' AND source_record_id = ? AND user_id = ?", (record_id, user_id))
+        
         conn.commit()
-    except sqlite3.Error as e:
+    except (sqlite3.Error, ValueError) as e:
         conn.rollback()
         return jsonify({"error": str(e)}), 500
     finally:
         conn.close()
     return jsonify({"status": "success"})
+
+
 
 @app.route('/api/records/<int:record_id>/quantity', methods=['PUT'])
 @login_required
