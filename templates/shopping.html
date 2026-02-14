@@ -149,14 +149,30 @@
                 <button class="btn btn-sm btn-success me-2" onclick="markAsCompleted(${item.id})">已购买</button>
                 <a href="#" class="delete-btn" onclick="deleteShoppingItem(${item.id})">删除</a>
             `;
-            li.innerHTML = `<div>${itemDetails}</div><div>${buttonsHtml}</div>`;
+            // **布局修改**
+            li.innerHTML = `
+                <div class="record-item-content">
+                    ${itemDetails}
+                </div>
+                <div class="flex-shrink-0">
+                    ${buttonsHtml}
+                </div>
+            `;
         } else {
             buttonsHtml = `
                 <button class="btn btn-sm btn-outline-warning me-2" onclick="markAsPending(${item.id})">恢复</button>
                 <button class="btn btn-sm btn-outline-primary me-2" onclick='openEditShoppingItemModal(${JSON.stringify(item)})'>编辑</button>
                 <a href="#" class="delete-btn" onclick="deleteShoppingItem(${item.id})">删除</a>
             `;
-            li.innerHTML = `<div class="text-decoration-line-through">${itemDetails}</div><div>${buttonsHtml}</div>`;
+            // **布局修改**
+            li.innerHTML = `
+                <div class="record-item-content text-decoration-line-through">
+                    ${itemDetails}
+                </div>
+                <div class="flex-shrink-0">
+                    ${buttonsHtml}
+                </div>
+            `;
         }
         return li;
     }

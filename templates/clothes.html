@@ -220,10 +220,10 @@
             person.items.forEach(item => {
                 itemsHtml += `
                     <li class="list-group-item d-flex justify-content-between align-items-center">
-                        <div>
+                        <div class="record-item-content">
                             <strong>${item.content}</strong> (${item.type}, ${item.color})
                         </div>
-                        <div>
+                        <div class="flex-shrink-0">
                             <span class="badge bg-secondary me-3">${item.quantity} 件/对</span>
                             <a href="#" class="btn btn-sm btn-outline-primary me-2" onclick='openEditClothModal(${JSON.stringify(item)})'>编辑</a>
                             <a href="#" class="delete-btn" onclick="deleteCloth(${item.id})">删除</a>
