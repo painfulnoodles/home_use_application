@@ -19,6 +19,19 @@
             margin-right: 1rem; /* 与按钮之间保持一些间距 */
             min-width: 0; /* 关键修复: 允许 flex item 收缩，防止内容溢出时推走旁边的元素 */
         }
+        /* 新增头像容器样式 */
+        .avatar-container {
+            width: 120px;
+            height: 120px;
+            border: 2px dashed #ccc;
+            border-radius: 50%;
+            cursor: pointer;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            overflow: hidden; /* 确保图片不会溢出圆形边框 */
+            background-color: #f8f9fa;
+        }
         .category-card { transition: transform 0.2s ease-in-out, box-shadow 0.2s ease-in-out; }
         .category-card:hover { transform: translateY(-5px); box-shadow: 0 4px 15px rgba(0,0,0,0.1); }
         .category-card a::after { content: ""; position: absolute; top: 0; right: 0; bottom: 0; left: 0; }
@@ -30,8 +43,8 @@
         <div class="container-fluid">
             <a class="navbar-brand mb-0 h1" href="/">📝 我的记录本</a>
             <div id="user-nav-info" class="d-none text-white d-flex align-items-center">
-                <!-- **新增**: 个人中心链接 -->
-                <a href="/profile" class="text-white text-decoration-none me-3">个人中心</a>
+                <!-- **修改**: 将个人中心链接改为按钮样式 -->
+                <a href="/profile" class="btn btn-sm btn-outline-light me-3">个人中心</a>
                 <img id="user-avatar" src="" class="rounded-circle" width="30" height="30" alt="avatar">
                 <span id="username-display" class="ms-2"></span>
                 <a href="/logout" class="btn btn-sm btn-outline-light ms-3">登出</a>
