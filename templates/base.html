@@ -55,9 +55,71 @@
     <div class="container mt-4">
         <div class="row">
             <div class="col-12 main-content">
-                {% block content %}{% endblock %}
+                {% block content %}
+                <!-- 分类导航卡片 -->
+                <div class="row row-cols-1 row-cols-md-2 g-4">
+                    <div class="col">
+                        <div class="card h-100 text-center category-card">
+                            <a href="/people" class="stretched-link"></a>
+                            <div class="card-body">
+                                <h5 class="card-title">👨‍👩‍👧‍👦 人员管理</h5>
+                                <p class="card-text text-muted">添加或删除家庭成员</p>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col">
+                        <div class="card h-100 text-center category-card">
+                            <a href="/medicine" class="stretched-link"></a>
+                            <div class="card-body">
+                                <h5 class="card-title">💊 药品记录</h5>
+                                <p class="card-text text-muted">管理家庭成员的用药情况</p>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col">
+                        <div class="card h-100 text-center category-card">
+                            <a href="/clothes" class="stretched-link"></a>
+                            <div class="card-body">
+                                <h5 class="card-title">👕 衣服清单</h5>
+                                <p class="card-text text-muted">整理每个人的衣物</p>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col">
+                        <div class="card h-100 text-center category-card">
+                            <a href="/shopping" class="stretched-link"></a>
+                            <div class="card-body">
+                                <h5 class="card-title">🛒 购物清单</h5>
+                                <p class="card-text text-muted">记录需要购买的物品</p>
+                            </div>
+                        </div>
+                    </div>
+                    <!-- 新增：交流社区卡片 -->
+                    <div class="col">
+                        <div class="card h-100 text-center category-card">
+                            <a href="/communicate" class="stretched-link"></a>
+                            <div class="card-body">
+                                <h5 class="card-title">💬 交流社区</h5>
+                                <p class="card-text text-muted">分享动态，互动交流</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+
+                <!-- 通用记录 -->
+                <div class="card mt-4">
+                    <div class="card-body">
+                        <h5 class="card-title">通用记录</h5>
+                        <p class="card-text">这里可以记录通用的事项，比如家庭会议、购物清单等。</p>
+                    </div>
+                </div>
+                {% endblock %}
             </div>
         </div>
+
+        <!-- 通用记录 -->
+        <!-- **修复**: 移除这里多余的卡片内容，它应该在 index.html 中 -->
     </div>
 
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
@@ -93,5 +155,30 @@
         });
     </script>
     {% block body_script %}{% endblock %}
+
+    <!-- 新增：图片查看器模态框 -->
+    <div class="modal fade" id="imageViewerModal" tabindex="-1" aria-labelledby="imageViewerModalLabel" aria-hidden="true">
+        <div class="modal-dialog modal-dialog-centered modal-lg">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="imageViewerModalLabel">查看图片</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body text-center">
+                    <img id="image-viewer-src" src="" class="img-fluid" alt="Enlarged image">
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // 新增：打开图片查看器的全局函数
+        function showImageModal(imageUrl) {
+            const imageViewer = document.getElementById('image-viewer-src');
+            imageViewer.src = imageUrl;
+            const modal = new bootstrap.Modal(document.getElementById('imageViewerModal'));
+            modal.show();
+        }
+    </script>
 </body>
 </html>

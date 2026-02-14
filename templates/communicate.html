@@ -1,0 +1,308 @@
+{% extends "base.html" %}
+
+{% block title %}交流社区{% endblock %}
+
+{% block head_script %}
+<style>
+    .post-card {
+        background-color: #fff;
+        border-radius: 8px;
+        margin-bottom: 1.5rem;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+    }
+    .post-header {
+        display: flex;
+        align-items: center;
+        padding: 1rem 1.5rem;
+        border-bottom: 1px solid #eee;
+    }
+    .post-avatar {
+        width: 40px;
+        height: 40px;
+        border-radius: 50%;
+        margin-right: 1rem;
+        object-fit: cover;
+    }
+    .post-author {
+        font-weight: bold;
+    }
+    .post-timestamp {
+        font-size: 0.8em;
+        color: #888;
+    }
+    .post-content {
+        padding: 1.5rem;
+        font-size: 1.1em;
+        line-height: 1.6;
+        white-space: pre-wrap; /* 保持文本中的换行 */
+    }
+    .post-photos {
+        padding: 0 1.5rem 1.5rem;
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px;
+    }
+    .post-photos img {
+        max-width: 150px;
+        max-height: 150px;
+        object-fit: cover;
+        border-radius: 5px;
+        cursor: pointer;
+    }
+    .post-actions {
+        padding: 0.5rem 1.5rem;
+        border-top: 1px solid #eee;
+        display: flex;
+        gap: 1rem;
+    }
+    .action-btn {
+        cursor: pointer;
+        color: #555;
+        background: none;
+        border: none;
+        padding: 0.5rem;
+        display: flex;
+        align-items: center;
+    }
+    .action-btn:hover {
+        color: #0d6efd;
+    }
+    .action-btn.liked {
+        color: #dc3545;
+        font-weight: bold;
+    }
+    .comments-section {
+        background-color: #f8f9fa;
+        padding: 1rem 1.5rem;
+    }
+    .comment {
+        margin-bottom: 0.75rem;
+        font-size: 0.95em;
+    }
+    .comment-author {
+        font-weight: bold;
+        margin-right: 0.5rem;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+    <a href="/" class="btn btn-sm btn-outline-secondary">&lt; 返回主页</a>
+    <h1 class="mb-0">交流社区</h1>
+    <div></div>
+</div>
+
+<!-- 发布新帖子 -->
+<div class="card mb-4">
+    <div class="card-body">
+        <h5 class="card-title">发布新动态</h5>
+        <textarea id="new-post-content" class="form-control" rows="3" placeholder="分享新鲜事..."></textarea>
+        <div class="mt-2">
+            <label for="new-post-photos" class="form-label">添加照片</label>
+            <input type="file" id="new-post-photos" class="form-control" multiple accept="image/*">
+        </div>
+        <button class="btn btn-primary mt-2" onclick="createPost()">发布</button>
+    </div>
+</div>
+
+<!-- 帖子列表 -->
+<div id="posts-container">
+    <!-- 帖子将在这里动态生成 -->
+</div>
+
+<!-- 编辑帖子的模态框 -->
+<div class="modal fade" id="editPostModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">编辑动态</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <input type="hidden" id="edit-post-id">
+                <div class="mb-3">
+                    <label for="edit-post-content" class="form-label">内容</label>
+                    <textarea id="edit-post-content" class="form-control" rows="5"></textarea>
+                </div>
+                <div class="mb-3">
+                    <label for="edit-post-timestamp" class="form-label">发布日期</label>
+                    <input type="datetime-local" id="edit-post-timestamp" class="form-control">
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">关闭</button>
+                <button type="button" class="btn btn-primary" onclick="savePostChanges()">保存更改</button>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block body_script %}
+<script>
+    let currentUserId = null;
+    let currentUsername = '';
+
+    async function fetchPosts() {
+        const response = await fetch('/api/posts');
+        const posts = await response.json();
+        const container = document.getElementById('posts-container');
+        container.innerHTML = '';
+
+        if (posts.length === 0) {
+            container.innerHTML = '<p class="text-center text-muted">还没有人发布动态，快来抢占第一个吧！</p>';
+            return;
+        }
+
+        posts.forEach(post => {
+            const postEl = document.createElement('div');
+            postEl.className = 'post-card';
+            postEl.id = `post-${post.id}`;
+
+            const isLiked = post.likes.includes(currentUserId);
+            const editBtnHtml = post.is_author ? `<a href="#" class="btn btn-sm btn-outline-secondary ms-auto me-2" onclick='openEditPostModal(${JSON.stringify(post)})'>编辑</a>` : '';
+            const deleteBtnHtml = post.is_author ? `<a href="#" class="delete-btn" onclick="deletePost(${post.id})">删除</a>` : '';
+
+            let photosHtml = '';
+            if (post.photos && post.photos.length > 0) {
+                photosHtml = `<div class="post-photos">` +
+                    post.photos.map(p => `<img src="/${p}" alt="post photo" onclick="showImageModal('/${p}')">`).join('') +
+                    `</div>`;
+            }
+
+            let commentsHtml = '';
+            if (post.comments.length > 0) {
+                commentsHtml = post.comments.map(comment => `
+                    <div class="comment">
+                        <span class="comment-author">${comment.author_username}:</span>
+                        <span>${comment.content}</span>
+                        ${comment.author_username === currentUsername ? `<a href="#" class="delete-btn ms-2" onclick="deleteComment(${comment.id})">x</a>` : ''}
+                    </div>
+                `).join('');
+            }
+
+            postEl.innerHTML = `
+                <div class="post-header">
+                    <img src="${post.author_avatar ? '/' + post.author_avatar : 'https://via.placeholder.com/40'}" alt="avatar" class="post-avatar">
+                    <div>
+                        <div class="post-author">${post.author_username}</div>
+                        <div class="post-timestamp">${new Date(post.timestamp).toLocaleString()}</div>
+                    </div>
+                    ${editBtnHtml}
+                    ${deleteBtnHtml}
+                </div>
+                <div class="post-content">${post.content}</div>
+                ${photosHtml}
+                <div class="post-actions">
+                    <button class="action-btn ${isLiked ? 'liked' : ''}" onclick="toggleLike(${post.id})">
+                        ❤️ <span class="ms-1">${post.likes.length}</span>
+                    </button>
+                    <button class="action-btn">💬 <span class="ms-1">${post.comments.length}</span></button>
+                </div>
+                <div class="comments-section">
+                    ${commentsHtml}
+                    <div class="input-group mt-2">
+                        <input type="text" class="form-control form-control-sm" placeholder="添加评论..." id="comment-input-${post.id}">
+                        <button class="btn btn-sm btn-outline-secondary" onclick="addComment(${post.id})">发送</button>
+                    </div>
+                </div>
+            `;
+            container.appendChild(postEl);
+        });
+    }
+
+    async function createPost() {
+        const content = document.getElementById('new-post-content').value;
+        const photosInput = document.getElementById('new-post-photos');
+        if (!content.trim()) return;
+
+        const formData = new FormData();
+        formData.append('content', content);
+        for (const file of photosInput.files) {
+            formData.append('photos', file);
+        }
+
+        await fetch('/api/posts', {
+            method: 'POST',
+            body: formData
+        });
+
+        document.getElementById('new-post-content').value = '';
+        photosInput.value = '';
+        await fetchPosts();
+    }
+
+    async function deletePost(postId) {
+        if (!confirm('确定要删除这条动态吗？所有相关的评论和点赞都会被删除。')) return;
+        await fetch(`/api/posts/${postId}`, { method: 'DELETE' });
+        await fetchPosts();
+    }
+
+    async function toggleLike(postId) {
+        await fetch(`/api/posts/${postId}/like`, { method: 'POST' });
+        await fetchPosts(); // 简单起见，直接刷新全部帖子
+    }
+
+    async function addComment(postId) {
+        const input = document.getElementById(`comment-input-${postId}`);
+        const content = input.value;
+        if (!content.trim()) return;
+
+        await fetch(`/api/posts/${postId}/comments`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ content })
+        });
+        input.value = '';
+        await fetchPosts();
+    }
+
+    async function deleteComment(commentId) {
+        if (!confirm('确定要删除这条评论吗？')) return;
+        await fetch(`/api/comments/${commentId}`, { method: 'DELETE' });
+        await fetchPosts();
+    }
+
+    function openEditPostModal(post) {
+        document.getElementById('edit-post-id').value = post.id;
+        document.getElementById('edit-post-content').value = post.content;
+        // 格式化日期和时间以适应 datetime-local 输入框
+        const localDateTime = new Date(new Date(post.timestamp).getTime() - (new Date().getTimezoneOffset() * 60000)).toISOString().slice(0, 16);
+        document.getElementById('edit-post-timestamp').value = localDateTime;
+        const modal = new bootstrap.Modal(document.getElementById('editPostModal'));
+        modal.show();
+    }
+
+    async function savePostChanges() {
+        const postId = document.getElementById('edit-post-id').value;
+        const content = document.getElementById('edit-post-content').value;
+        const timestamp = document.getElementById('edit-post-timestamp').value;
+
+        const formData = new FormData();
+        formData.append('content', content);
+        formData.append('timestamp', new Date(timestamp).toISOString());
+
+        await fetch(`/api/posts/${postId}`, {
+            method: 'PUT',
+            body: formData
+        });
+
+        const modal = bootstrap.Modal.getInstance(document.getElementById('editPostModal'));
+        modal.hide();
+        await fetchPosts();
+    }
+
+    document.addEventListener('DOMContentLoaded', async () => {
+        if (['/login', '/register'].includes(window.location.pathname)) return;
+        
+        // 获取当前用户信息以判断点赞状态和评论作者
+        const userResponse = await fetch('/api/user/current');
+        const user = await userResponse.json();
+        currentUserId = user.id;
+        currentUsername = user.username;
+
+        await fetchPosts();
+    });
+</script>
+{% endblock %}

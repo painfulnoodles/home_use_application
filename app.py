@@ -5,6 +5,7 @@ from datetime import datetime
 from werkzeug.security import generate_password_hash, check_password_hash
 from flask_login import LoginManager, login_user, logout_user, login_required, current_user
 from user import User
+from communicate import communicate_bp # <--- 1. 导入蓝图
 
 app = Flask(__name__)
 # 请务必在生产环境中更改此密钥
@@ -15,6 +16,8 @@ login_manager = LoginManager()
 login_manager.init_app(app)
 # 如果用户未登录并尝试访问受保护的页面，将他们重定向到'login'视图
 login_manager.login_view = 'login'
+
+app.register_blueprint(communicate_bp) # <--- 2. 注册蓝图
 
 @login_manager.user_loader
 def load_user(user_id):
@@ -85,6 +88,45 @@ def init_db():
             FOREIGN KEY(person_id) REFERENCES people(id)
         )
     ''')
+
+    # --- 新增：创建帖子、评论和点赞的表 ---
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS posts (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            content TEXT NOT NULL,
+            timestamp DATETIME NOT NULL,
+            FOREIGN KEY(user_id) REFERENCES users(id)
+        )
+    ''')
+    
+    # --- 新增：为 posts 表添加 photos 列 (如果不存在) ---
+    post_columns = [col[1] for col in cursor.execute("PRAGMA table_info(posts)").fetchall()]
+    if 'photos' not in post_columns:
+        cursor.execute('ALTER TABLE posts ADD COLUMN photos TEXT')
+
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS comments (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            post_id INTEGER NOT NULL,
+            user_id INTEGER NOT NULL,
+            content TEXT NOT NULL,
+            timestamp DATETIME NOT NULL,
+            FOREIGN KEY(post_id) REFERENCES posts(id),
+            FOREIGN KEY(user_id) REFERENCES users(id)
+        )
+    ''')
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS likes (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            post_id INTEGER NOT NULL,
+            user_id INTEGER NOT NULL,
+            FOREIGN KEY(post_id) REFERENCES posts(id),
+            FOREIGN KEY(user_id) REFERENCES users(id),
+            UNIQUE(post_id, user_id)
+        )
+    ''')
+
 
     print("Table schemas are up to date.")
     conn.commit()
@@ -983,7 +1025,8 @@ def show_page(page_name):
     if not current_user.is_authenticated:
         return redirect(url_for('login'))
         
-    if page_name in ['medicine', 'clothes', 'shopping', 'people', 'profile']: # **新增** 'profile'
+    # <--- 3. 添加 'communicate' 到允许的页面列表
+    if page_name in ['medicine', 'clothes', 'shopping', 'people', 'profile', 'communicate']: 
         return render_template(f'{page_name}.html')
         
     return "Page not found", 404
