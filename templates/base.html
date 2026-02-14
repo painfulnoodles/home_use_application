@@ -12,6 +12,13 @@
         .main-content { min-height: 80vh; }
         .delete-btn { color: red; cursor: pointer; text-decoration: none; }
         .record-meta { font-size: 0.85em; color: #6c757d; }
+        /* 新增样式 */
+        .record-item-content {
+            flex-grow: 1; /* 占据所有可用空间 */
+            word-break: break-word; /* 允许在单词内换行，防止长单词溢出 */
+            margin-right: 1rem; /* 与按钮之间保持一些间距 */
+            min-width: 0; /* 关键修复: 允许 flex item 收缩，防止内容溢出时推走旁边的元素 */
+        }
         .category-card { transition: transform 0.2s ease-in-out, box-shadow 0.2s ease-in-out; }
         .category-card:hover { transform: translateY(-5px); box-shadow: 0 4px 15px rgba(0,0,0,0.1); }
         .category-card a::after { content: ""; position: absolute; top: 0; right: 0; bottom: 0; left: 0; }

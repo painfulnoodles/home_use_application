@@ -185,13 +185,14 @@
                     `;
                 }
 
+                // **布局修改**: 调整 HTML 结构以实现文本换行和按钮对齐
                 li.innerHTML = `
-                    <div>
+                    <div class="record-item-content">
                         ${urgencyBadge}
                         <span>${record.content}</span>
                         <div class="record-meta">${record.time || ''}</div>
                     </div>
-                    <div>
+                    <div class="flex-shrink-0">
                         ${buttonsHtml}
                     </div>
                 `;
